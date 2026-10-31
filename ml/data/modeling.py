@@ -20,7 +20,6 @@ MODEL_FEATURES = [
     "address_txn_count_1h",
     "address_txn_count_24h",
     "address_has_history_1h",
-    "address_has_history_24h",
     "address_amount_sum_24h",
 ]
 
