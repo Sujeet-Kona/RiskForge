@@ -154,14 +154,145 @@ def tiny_explainer(tiny_pipeline: Pipeline):
 @pytest.fixture(scope="session")
 def tiny_policy():
     """The frozen Phase 4 policy, with its real locked thresholds."""
-    from policy.costs import EXPERIMENTAL_COST_ASSUMPTIONS
-    from policy.decision import DecisionPolicy, PolicyConfig
+    from policy.locked import build_locked_policy
 
-    return DecisionPolicy(
-        PolicyConfig(
-            policy_version="policy-001",
-            review_threshold=0.075,
-            block_threshold=0.110,
-            costs=EXPERIMENTAL_COST_ASSUMPTIONS,
-        )
+    return build_locked_policy()
+
+
+@pytest.fixture(scope="session")
+def tiny_calibrator(tiny_frame: pd.DataFrame, tiny_pipeline: Pipeline):
+    """An isotonic mapping fitted on the tiny frame's own held-out-style scores.
+
+    Deliberately not the locked Phase 3 calibrator: this exists so the serving
+    tests have a real fitted mapping to apply, not to reproduce production
+    calibration.
+    """
+    from ml.models.calibration import fit_calibrator
+
+    raw = tiny_pipeline.predict_proba(tiny_frame[MODEL_FEATURES])[:, 1]
+
+    return fit_calibrator(
+        "isotonic",
+        pd.Series(raw, index=tiny_frame.index),
+        tiny_frame[TARGET_COLUMN],
     )
+
+
+@pytest.fixture(scope="session")
+def tiny_artifact(tiny_pipeline: Pipeline, tiny_calibrator):
+    """A complete serving bundle around the tiny fitted pipeline."""
+    from ml.models.artifact import (
+        FEATURE_VERSION,
+        MODEL_VERSION,
+        RiskForgeArtifact,
+        current_library_versions,
+        utc_now_iso,
+    )
+
+    classifier = tiny_pipeline.named_steps["classifier"]
+
+    return RiskForgeArtifact(
+        pipeline=tiny_pipeline,
+        calibrator=tiny_calibrator,
+        model_version=MODEL_VERSION,
+        feature_version=FEATURE_VERSION,
+        policy_version="policy-001",
+        calibration_method="isotonic",
+        review_threshold=0.075,
+        block_threshold=0.110,
+        scale_pos_weight=1.0,
+        n_transformed_columns=int(classifier.n_features_in_),
+        feature_columns=tuple(MODEL_FEATURES),
+        n_train_rows=TINY_ROWS,
+        n_calibration_rows=TINY_ROWS,
+        library_versions=current_library_versions(),
+        built_at_utc=utc_now_iso(),
+    )
+
+
+@pytest.fixture(scope="session")
+def tiny_artifact_path(tiny_artifact, tmp_path_factory):
+    """The bundle written to disk and read back, as the API reads it.
+
+    Going through save/load rather than handing the in-memory object to the
+    service is what makes the fixtures exercise the real artifact contract.
+    """
+    from ml.models.artifact import ARTIFACT_FILENAME, save_artifact
+
+    directory = tmp_path_factory.mktemp("serving-artifact")
+    path = directory / ARTIFACT_FILENAME
+
+    save_artifact(tiny_artifact, path)
+
+    return path
+
+
+@pytest.fixture(scope="session")
+def loaded_artifact(tiny_artifact_path):
+    from ml.models.artifact import load_artifact
+
+    return load_artifact(tiny_artifact_path)
+
+
+@pytest.fixture(scope="session")
+def serving_service(loaded_artifact):
+    from app.service import RiskScoringService
+
+    return RiskScoringService.from_artifact(loaded_artifact)
+
+
+@pytest.fixture(scope="session")
+def client(tiny_artifact_path):
+    """A TestClient whose app boots from the on-disk tiny artifact."""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    with TestClient(create_app(artifact_path=tiny_artifact_path)) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def score_payload() -> dict:
+    """A minimal well-formed scoring request, as a caller would send it."""
+    return {
+        "transaction": {
+            "TransactionID": "3000001",
+            "TransactionDT": 200_000,
+            "TransactionAmt": 117.5,
+            "card1": 13926,
+            "addr1": 299.0,
+            "addr2": 87.0,
+            "ProductCD": "W",
+            "card6": "debit",
+            "P_emaildomain": "gmail.com",
+            "R_emaildomain": None,
+            "C1": 1.0,
+            "C2": 1.0,
+            "C11": 2.0,
+            "C13": 1.0,
+            "D2": None,
+            "D3": None,
+            "D4": 0.0,
+            "D8": None,
+            "D10": 1.0,
+            "D11": 1.0,
+            "D15": 0.0,
+        },
+        "history": [
+            {
+                "TransactionDT": 199_000,
+                "TransactionAmt": 42.0,
+                "card1": 13926,
+                "addr1": 299.0,
+                "addr2": 87.0,
+            },
+            {
+                "TransactionDT": 150_000,
+                "TransactionAmt": 18.25,
+                "card1": 13926,
+                "addr1": 299.0,
+                "addr2": 87.0,
+            },
+        ],
+    }

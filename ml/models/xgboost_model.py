@@ -15,6 +15,13 @@ from ml.data.modeling import (
 from ml.models.preprocessing import build_feature_preprocessor
 
 
+# The two step names are part of the locked pipeline's identity: the serving
+# artifact, the explainer and every consumer address the fitted objects through
+# them. They are defined here because this module builds the pipeline.
+PREPROCESSOR_STEP_NAME = "preprocessor"
+CLASSIFIER_STEP_NAME = "classifier"
+
+
 @dataclass(frozen=True)
 class XGBoostFraudModel:
     model: Pipeline
@@ -82,8 +89,8 @@ def build_xgboost_model(train: pd.DataFrame) -> XGBoostFraudModel:
 
     pipeline = Pipeline(
         steps=[
-            ("preprocessor", build_feature_preprocessor()),
-            ("classifier", classifier),
+            (PREPROCESSOR_STEP_NAME, build_feature_preprocessor()),
+            (CLASSIFIER_STEP_NAME, classifier),
         ]
     )
 

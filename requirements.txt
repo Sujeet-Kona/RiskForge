@@ -11,4 +11,19 @@ xgboost==3.4.1
 # resolves only shap plus its own pinned transitive dependency slicer==0.0.8,
 # with no version change to numpy, scipy, scikit-learn or xgboost.
 shap==0.54.1
+# Serialization of the frozen serving bundle (Phase 6). Pinned because
+# ml/models/artifact.py imports joblib directly, and a joblib bundle embeds the
+# internal state of the fitted estimators it carries.
+joblib==1.6.0
+# FastAPI inference service (Phase 6).
+# Verified against the pinned stack above: `pip install --dry-run fastapi uvicorn
+# httpx` reported only new packages, with no version change to pandas, numpy,
+# scipy, scikit-learn, pyarrow, xgboost or shap. Pydantic is pinned separately
+# because the request/response schemas import it directly; starlette, anyio,
+# click, h11, httpcore and pydantic-core arrive as fastapi's own transitive
+# requirements and are not choices made by this project.
+fastapi==0.162.0
+pydantic==2.14.2
+uvicorn==0.54.0
+httpx==0.28.1
 pytest==9.2.0
