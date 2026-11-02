@@ -1,10 +1,14 @@
-# RiskForge inference API (Phase 6)
+# RiskForge inference API
 
-A stateless FastAPI service that scores one transaction with the locked XGBoost
-model, the locked isotonic calibration, the frozen `policy-001` decision rule and
-the Phase 5 explanation layer.
+A FastAPI service that scores one transaction with the locked XGBoost model, the
+locked isotonic calibration, the frozen `policy-001` decision rule and the
+explanation layer — and records every decision it returns in a PostgreSQL audit
+store.
 
-**Phase 6 is stateless. Persistent transaction history is introduced in Phase 7.**
+**The service keeps no transaction history of its own.** Behavioral features are
+computed from the `history` array the caller sends with each request. The audit
+store records decisions that have already been made and is never read back as
+feature history — see [docs/audit.md](audit.md).
 
 ---
 
@@ -20,14 +24,15 @@ It is not:
   can only see what the caller sends in the request, so it cannot detect a burst
   of activity across requests, and it cannot compute `card_txn_count_1h` for a
   card it has never been told about.
-- **not a production deployment.** There is no container, no TLS, no auth, no
-  rate limiting, no monitoring, no horizontal scaling story. Those are later
-  phases.
-- **not an audit trail.** Nothing is written down. Phase 7 adds PostgreSQL
-  persistence for exactly the payload this API returns.
+- **not a production deployment.** There is no TLS, no auth, no rate limiting, no
+  monitoring, no horizontal scaling story. The only container in the repository
+  is a local PostgreSQL for development. Those are later phases.
+- **not a feature store.** The audit store is append-only and write-only from the
+  API's point of view: nothing in the scoring path reads it.
 
 Everything it reports is a deterministic function of the frozen artifact and the
-request. There is no randomness, no LLM and no external call.
+request. There is no randomness, no LLM and no external call other than the one
+audit write.
 
 ---
 
@@ -59,11 +64,15 @@ The artifact directory is gitignored. Without it the service starts and returns
 ## 3. Starting the server
 
 ```bash
+docker compose up -d          # local PostgreSQL for the audit store
+.venv/bin/alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
 The artifact is loaded once, during application startup. It is not re-read per
-request, and nothing is fitted at request time.
+request, and nothing is fitted at request time. The database engine is also built
+once at startup, but opening it connects to nothing: an unreachable database is
+discovered when a decision is written, not when the service boots.
 
 Interactive OpenAPI docs are served by FastAPI at `/docs`.
 
@@ -71,7 +80,7 @@ Interactive OpenAPI docs are served by FastAPI at `/docs`.
 
 ## 4. `GET /health`
 
-Liveness plus artifact identity. It performs no inference.
+Liveness, artifact identity, and audit-store readiness. It performs no inference.
 
 `200` when the artifact loaded:
 
@@ -81,6 +90,7 @@ Liveness plus artifact identity. It performs no inference.
   "model_version": "xgb-001",
   "feature_version": "behavioral-v1",
   "policy_version": "policy-001",
+  "database": "ready",
   "artifact": {
     "artifact_schema_version": 1,
     "model_version": "xgb-001",
@@ -108,9 +118,17 @@ Liveness plus artifact identity. It performs no inference.
   "model_version": null,
   "feature_version": null,
   "policy_version": null,
-  "artifact": null
+  "artifact": null,
+  "database": "ready"
 }
 ```
+
+`status` describes the model artifact and keeps its previous meaning, so an
+existing caller sees no change. `database` is reported separately as `ready` or
+`unavailable`, because the two can disagree: a service whose artifact is fine but
+whose audit store is down is alive and still `200`, but it cannot return a
+decision. Readiness is one `SELECT 1` round trip — no table access, no query plan
+— so `/health` stays cheap enough to poll.
 
 ---
 
@@ -320,7 +338,7 @@ Reading it:
 ### 5.5 Version fields
 
 `xgb-001`, `behavioral-v1` and `policy-001` are **project artifact identifiers,
-not registry versions**. RiskForge has no model registry in Phase 6, so there is
+not registry versions**. RiskForge has no model registry, so there is
 nothing behind them except the local bundle and the locked feature contract.
 `policy-001` is the frozen Phase 4 policy and is the one identifier with a formal
 definition behind it: `T_REVIEW = 0.075`, `T_BLOCK = 0.110`.
@@ -339,25 +357,45 @@ an exception class name; the underlying detail is logged server-side.
 | `500` | An unexpected failure during scoring | `inference_failed` |
 | `503` | The artifact is missing | `artifact_not_found` |
 | `503` | The artifact exists but is rejected (wrong contract, wrong width, unfitted calibrator, foreign library versions) | `artifact_invalid` |
+| `503` | A decision was produced but could not be written to the audit store | `audit_unavailable` |
 
 A failure is never reported as a score. The `500` body contains no
 `risk_probability` and no `decision`, because inventing one would be worse than
-failing.
+failing. The `audit_unavailable` body is held to the same rule for a different
+reason: the decision was computed, but returning it would claim an audit trail
+that does not exist.
+
+`audit_unavailable` is a `503` rather than a `500` so that "we could not record
+it" is distinguishable from "scoring broke". It is per-request: nothing is
+latched, and the next request succeeds once the store is reachable. The driver
+error is logged server-side with its traceback and never reaches the client — no
+DSN, no SQL, no driver name, no filesystem path.
 
 ---
 
-## 7. Why there is no PostgreSQL yet
+## 7. Where the decision is written
 
-Audit persistence is Phase 7. Adding a database here would mean either writing
-audit rows that nothing reads, or — worse — reading transaction history from a
-store that this phase has no way to populate correctly.
+After the decision is complete and before the response is returned, the endpoint
+writes one audit row built from the response object itself, so what is stored and
+what was reported are the same values by construction rather than by convention:
 
-So Phase 6 returns exactly the data Phase 7 will persist, and holds none of it.
-The consequence is the limitation stated at the top: the caller owns the history.
-A deployment that sends no history gets a score computed from the current
-transaction alone, with every behavioral count at zero, and that score will differ
-from the offline pipeline's for the same row. That is not a bug in the service; it
-is the absence of state, made visible.
+```
+transaction → inference → decision/explanation → audit record → API response
+```
+
+The write cannot change the decision. `app/service.py` imports nothing from `db/`,
+so the scoring path is identical to the one that produced the offline metrics, and
+`scripts/verify_serving_parity.py` still runs with no database present.
+
+The caller still owns the history. A deployment that sends no history gets a score
+computed from the current transaction alone, with every behavioral count at zero,
+and that score will differ from the offline pipeline's for the same row. The audit
+store does not fix that, and must not be used to: it is append-only, and reading
+prior decisions back as behavioral context would break the point-in-time contract.
+That is not a limitation of this phase, it is the rule the phase was built under.
+
+See [docs/audit.md](audit.md) for the schema, the migration commands and the full
+failure behaviour.
 
 ---
 
@@ -431,16 +469,25 @@ That request produced the response in §5.4.
 
 | Path | Role |
 | --- | --- |
-| `app/config.py` | Artifact path, default `top_k`, history bound, stateless note |
+| `app/config.py` | Artifact path, default `top_k`, history bound, history note |
 | `app/schemas.py` | Pydantic request and response models; the wire contract |
 | `app/features.py` | Request payload to the locked 28-feature frame, via the offline feature function |
 | `app/service.py` | Features to probability to decision to explanation |
-| `app/dependencies.py` | Startup artifact loading and the per-request dependency |
+| `app/audit.py` | Response object to audit record, and the refusal when it cannot be stored |
+| `app/dependencies.py` | Startup artifact and audit-store loading, and the per-request dependencies |
 | `app/main.py` | Application factory, routes, error handlers |
+| `db/config.py` | The only place `DATABASE_URL` is read |
+| `db/session.py` | Engine, session factory, readiness probe |
+| `db/models.py` | The `risk_decisions` declarative model |
+| `db/repository.py` | `create_audit_record` / `get_audit_record`, and the record's validation |
+| `alembic/` | The schema, reproducible from the repository |
 | `ml/models/artifact.py` | Artifact bundle, validation, save and load |
 | `policy/locked.py` | The one frozen `policy-001` definition |
 | `scripts/build_serving_artifact.py` | The only producer of the bundle |
 | `scripts/verify_serving_parity.py` | Offline-versus-API regression on real data |
 
-Only `app/dependencies.py` and `app/main.py` import FastAPI. `policy/` imports
-nothing from `ml/`, `explain/` or `app/`.
+Only `app/dependencies.py` and `app/main.py` import FastAPI. No module in `app/`
+imports `sqlalchemy`, `psycopg` or `alembic`: the database is reached through
+`db.repository`'s `AuditStore` boundary and nowhere else. `policy/` imports
+nothing from `ml/`, `explain/`, `app/` or `db/`, and `db/` imports nothing from
+`app/`, `ml/` or `explain/` — only `policy.decision`, for the decision vocabulary.

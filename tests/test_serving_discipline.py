@@ -4,7 +4,8 @@ Behavioural tests can show that the API did the right thing once; these show
 that it cannot do the wrong thing. They are AST checks in the same style as
 ``test_explainability_discipline.py``: no training at request time, no second
 feature pipeline, no later-phase infrastructure, no client-visible internals,
-and no second copy of the frozen thresholds.
+no second copy of the frozen thresholds, and an audit store that the serving
+layer reaches only through its boundary module.
 """
 
 from __future__ import annotations
@@ -23,14 +24,15 @@ TEST_SOURCES = sorted((REPO_ROOT / "tests").glob("test_app_*.py"))
 POLICY_DIR = REPO_ROOT / "policy"
 ML_DIR = REPO_ROOT / "ml"
 EXPLAIN_DIR = REPO_ROOT / "explain"
+DB_DIR = REPO_ROOT / "db"
+ALEMBIC_DIR = REPO_ROOT / "alembic"
 
-# Infrastructure that belongs to Phase 7 and later. None of it may appear while
-# the service is still stateless.
+DB_SOURCES = sorted(DB_DIR.glob("*.py"))
+
+# Infrastructure that is still out of scope. Phase 7 added an audit store and
+# nothing else: no cache, no queue, no worker, no orchestration, no registry, no
+# object store, and no second database driver.
 LATER_PHASE_ROOTS = {
-    "sqlalchemy",
-    "alembic",
-    "psycopg",
-    "psycopg2",
     "asyncpg",
     "redis",
     "kafka",
@@ -41,6 +43,37 @@ LATER_PHASE_ROOTS = {
     "docker",
     "boto3",
     "pymongo",
+}
+
+# The audit store is a dependency of the serving layer now, but only through its
+# own boundary module. The ORM, the driver and the engine stay inside ``db``.
+DATABASE_ROOTS = {"sqlalchemy", "psycopg", "psycopg2", "alembic"}
+
+# Which ``app`` module may name which ``db`` module. ``dependencies.py`` is the
+# only one allowed to build the store; everything else may only refer to the
+# boundary type and the record it carries.
+ALLOWED_DATABASE_IMPORTS = {
+    "audit.py": {"db.repository"},
+    "dependencies.py": {"db.config", "db.repository", "db.session"},
+    "main.py": {"db.repository"},
+}
+
+# The audit store holds decisions. It must not hold, or import, any of the
+# machinery that produces them.
+MODEL_AND_SERVING_ROOTS = {
+    "app",
+    "explain",
+    "ml",
+    "scripts",
+    "fastapi",
+    "starlette",
+    "xgboost",
+    "sklearn",
+    "scipy",
+    "shap",
+    "pandas",
+    "numpy",
+    "joblib",
 }
 
 AUTH_ROOTS = {"jwt", "jose", "passlib", "bcrypt", "authlib", "oauthlib", "itsdangerous"}
@@ -205,7 +238,93 @@ def test_no_app_module_calls_the_classifier_directly(path: Path):
     assert "predict_proba" not in _called_names(_tree(path)), path.name
 
 
-# --- requirements 26 and 27: stateless, offline ------------------------------
+def test_the_scoring_service_stays_database_free():
+    """``service.score()`` is what the offline parity check drives.
+
+    If the scoring path needed a database, the parity gate could no longer be run
+    against the frozen artifact alone, and a decision would depend on something
+    other than the model, the calibration and the policy.
+    """
+    modules = _imported_modules(_tree(APP_DIR / "service.py"))
+
+    assert not any(module.split(".")[0] == "db" for module in modules)
+
+
+# --- the audit store is a boundary, not a second dependency ------------------
+
+
+@pytest.mark.parametrize("path", APP_SOURCES, ids=lambda p: p.name)
+def test_no_app_module_imports_the_orm_or_a_driver(path: Path):
+    """SQLAlchemy and psycopg stay inside ``db``; ``app`` names a boundary type."""
+    assert not (_imported_roots(_tree(path)) & DATABASE_ROOTS), path.name
+
+
+@pytest.mark.parametrize("path", APP_SOURCES, ids=lambda p: p.name)
+def test_the_app_layer_reaches_the_database_through_a_narrow_door(path: Path):
+    imported = {
+        module
+        for module in _imported_modules(_tree(path))
+        if module.split(".")[0] == "db"
+    }
+
+    assert imported <= ALLOWED_DATABASE_IMPORTS.get(path.name, set()), path.name
+
+
+def test_the_audit_store_is_built_in_exactly_one_place():
+    """One construction site, so one place to point at a double in a test."""
+    builders = [
+        path.name
+        for path in APP_SOURCES
+        if "build_audit_store" in _called_names(_tree(path))
+    ]
+
+    assert builders == ["dependencies.py"]
+
+
+def test_the_score_endpoint_records_the_decision_before_returning_it():
+    """Persistence sits between the decision and the response, never after it.
+
+    A write placed after the ``return`` would be dead code, and a response
+    returned before the write would report a decision that might never be
+    audited.
+    """
+    endpoint = next(
+        node
+        for node in ast.walk(_tree(APP_DIR / "main.py"))
+        if isinstance(node, ast.FunctionDef) and node.name == "score"
+    )
+
+    recorded = [
+        position
+        for position, statement in enumerate(endpoint.body)
+        if "record_decision" in _called_names(statement)
+    ]
+    returned = [
+        position
+        for position, statement in enumerate(endpoint.body)
+        if isinstance(statement, ast.Return)
+    ]
+
+    assert recorded, "the score endpoint does not persist the decision"
+    assert returned
+    assert recorded[0] < returned[0]
+
+
+@pytest.mark.parametrize("path", DB_SOURCES, ids=lambda p: p.name)
+def test_the_audit_store_contains_no_model_or_serving_logic(path: Path):
+    """The database records decisions; it cannot produce, alter or explain one."""
+    assert not (_imported_roots(_tree(path)) & MODEL_AND_SERVING_ROOTS), path.name
+
+
+@pytest.mark.parametrize("path", DB_SOURCES, ids=lambda p: p.name)
+def test_no_audit_module_restates_the_frozen_thresholds(path: Path):
+    source = path.read_text()
+
+    for literal in THRESHOLD_LITERALS:
+        assert literal not in source, f"{path.name} hardcodes {literal}"
+
+
+# --- requirements 26 and 27: offline, and no network -------------------------
 
 
 @pytest.mark.parametrize("path", APP_SOURCES, ids=lambda p: p.name)
@@ -351,16 +470,27 @@ def test_the_locked_policy_is_the_single_source_of_the_thresholds():
 
 
 @pytest.mark.parametrize(
-    "directory", [POLICY_DIR, ML_DIR, EXPLAIN_DIR], ids=lambda p: p.name
+    "directory",
+    [POLICY_DIR, ML_DIR, EXPLAIN_DIR, DB_DIR, ALEMBIC_DIR],
+    ids=lambda p: p.name,
 )
 def test_no_lower_layer_imports_the_serving_layer(directory: Path):
     for path in sorted(directory.rglob("*.py")):
         assert "app" not in _imported_roots(_tree(path)), path.name
 
 
+@pytest.mark.parametrize(
+    "directory", [POLICY_DIR, ML_DIR, EXPLAIN_DIR], ids=lambda p: p.name
+)
+def test_no_model_layer_imports_the_audit_store(directory: Path):
+    """Persistence is downstream of a decision, never an input to one."""
+    for path in sorted(directory.rglob("*.py")):
+        assert "db" not in _imported_roots(_tree(path)), path.name
+
+
 @pytest.mark.parametrize("path", sorted(POLICY_DIR.glob("*.py")), ids=lambda p: p.name)
 def test_the_policy_package_stays_independent_of_the_serving_stack(path: Path):
-    forbidden = {"app", "fastapi", "starlette", "pydantic", "joblib"}
+    forbidden = {"app", "db", "fastapi", "starlette", "pydantic", "joblib"}
 
     assert not (_imported_roots(_tree(path)) & forbidden), path.name
 

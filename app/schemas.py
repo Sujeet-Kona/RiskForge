@@ -1,4 +1,4 @@
-"""Request and response contracts for the Phase 6 inference API.
+"""Request and response contracts for the inference API.
 
 Request field names are the locked contract names verbatim — ``TransactionDT``,
 ``ProductCD``, ``C13`` — rather than API-styled renamings. That is deliberate:
@@ -207,6 +207,15 @@ class RiskScoreResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """Liveness, artifact identity, and audit-store readiness.
+
+    ``status`` describes the model artifact, exactly as it did before the audit
+    store existed: ``ok`` or ``unavailable``. ``database`` is reported separately
+    as ``ready`` or ``unavailable``, because the two can disagree — a service
+    whose artifact is fine but whose audit store is down cannot return a decision,
+    and a caller needs to be able to tell those two failures apart.
+    """
+
     model_config = STRICT
 
     status: str
@@ -214,6 +223,7 @@ class HealthResponse(BaseModel):
     feature_version: str | None = None
     policy_version: str | None = None
     artifact: dict | None = None
+    database: str | None = None
 
 
 class ErrorOut(BaseModel):

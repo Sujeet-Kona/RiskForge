@@ -7,9 +7,14 @@ __pycache__/
 
 .env
 .env.*
+# The template is committed; every other .env.* file is a local secret.
+!.env.example
 
 data/raw/*
 data/processed/*
 artifacts/
+
+# Local database files, if a volume is ever bind-mounted instead of named.
+pgdata/
 
 .DS_Store

@@ -1,4 +1,4 @@
-"""Serving configuration for the Phase 6 inference API.
+"""Serving configuration for the inference API.
 
 Only values the API itself owns live here. The frozen model, feature and policy
 identifiers come from the artifact and from :mod:`policy.locked`, so nothing in
@@ -28,7 +28,9 @@ DEFAULT_TOP_K = 3
 # matches the offline pipeline for the same transaction.
 MAX_HISTORY_TRANSACTIONS = 2000
 
-STATELESS_NOTE = (
-    "Phase 6 is stateless. Persistent transaction history is introduced in "
-    "Phase 7."
+HISTORY_NOTE = (
+    "The service keeps no transaction history of its own: behavioral features "
+    "are computed from the `history` array the caller supplies with each request. "
+    "The PostgreSQL audit store records decisions that have already been made and "
+    "is never read back as feature history."
 )

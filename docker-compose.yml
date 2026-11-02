@@ -1,0 +1,32 @@
+# Local PostgreSQL for the Phase 7 audit store.
+#
+# This is the whole of RiskForge's local infrastructure: one database. There is
+# no Redis, no Kafka, no worker and no application service here — the API runs
+# from the host virtualenv against this container. Data lives in a named volume,
+# so nothing a database writes ends up in the repository.
+#
+#   docker compose up -d
+#   .venv/bin/alembic upgrade head
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: riskforge-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-riskforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-riskforge}
+      POSTGRES_DB: ${POSTGRES_DB:-riskforge}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - audit-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-riskforge} -d ${POSTGRES_DB:-riskforge}
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  audit-data:

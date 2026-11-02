@@ -26,4 +26,14 @@ fastapi==0.162.0
 pydantic==2.14.2
 uvicorn==0.54.0
 httpx==0.28.1
+# PostgreSQL audit persistence (Phase 7). SQLAlchemy 2.x typed declarative
+# models, Alembic for the schema, psycopg 3 as the driver.
+# Verified against the pinned stack above: `pip install --dry-run sqlalchemy
+# alembic 'psycopg[binary]'` reported no version change to pandas, numpy,
+# scipy, scikit-learn, pyarrow, xgboost, shap, joblib, fastapi, pydantic or
+# starlette. The only additions to the environment were alembic's own template
+# requirements (Mako, MarkupSafe) and psycopg-binary.
+SQLAlchemy==2.1.6
+alembic==1.20.1
+psycopg[binary]==3.3.6
 pytest==9.2.0
