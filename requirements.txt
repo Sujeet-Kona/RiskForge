@@ -6,4 +6,9 @@ scikit-learn==1.9.1
 scipy==1.18.1
 pyarrow==26.0.0
 xgboost==3.4.1
+# TreeSHAP attribution for the already-fitted XGBoost model (Phase 5).
+# Verified against the pinned stack above: `pip install --dry-run shap`
+# resolves only shap plus its own pinned transitive dependency slicer==0.0.8,
+# with no version change to numpy, scipy, scikit-learn or xgboost.
+shap==0.54.1
 pytest==9.2.0
