@@ -7,7 +7,9 @@ import pandas as pd
 
 TARGET_COLUMN = "isFraud"
 
-MODEL_FEATURES = [
+SPLIT_COLUMN = "TransactionDT"
+
+BEHAVIORAL_FEATURES = [
     "TransactionAmt",
     "amount_log1p",
     "transaction_hour_bucket",
@@ -24,17 +26,39 @@ MODEL_FEATURES = [
 ]
 
 CATEGORICAL_FEATURES = [
-    "transaction_hour_bucket",
-    "transaction_day_mod7",
+    "ProductCD",
+    "card6",
+    "P_emaildomain",
+    "R_emaildomain",
+]
+
+# D5 is deliberately absent: validation-only backward elimination showed that
+# removing it improved validation PR-AUC (0.471864 -> 0.474352), and the locked
+# test partition must not influence feature selection.
+CD_FEATURES = [
+    "C1",
+    "C2",
+    "C11",
+    "C13",
+    "D2",
+    "D3",
+    "D4",
+    "D8",
+    "D10",
+    "D11",
+    "D15",
+]
+
+MODEL_FEATURES = [
+    *BEHAVIORAL_FEATURES,
+    *CATEGORICAL_FEATURES,
+    *CD_FEATURES,
 ]
 
 NUMERIC_FEATURES = [
-    feature
-    for feature in MODEL_FEATURES
-    if feature not in CATEGORICAL_FEATURES
+    *BEHAVIORAL_FEATURES,
+    *CD_FEATURES,
 ]
-
-SPLIT_COLUMN = "TransactionDT"
 
 
 @dataclass(frozen=True)
@@ -47,18 +71,35 @@ class ModelingFrame:
 
 def build_modeling_frame(
     behavioral: pd.DataFrame,
+    transaction_features: pd.DataFrame,
     labels: pd.DataFrame,
 ) -> ModelingFrame:
-    """Attach fraud labels and construct the first model feature contract.
+    """Assemble the official 28-feature modeling frame.
 
-    The raw behavioral entity identifiers remain available before this
-    function but are deliberately excluded from MODEL_FEATURES.
-    TransactionDT is retained only for chronological splitting.
+    ``behavioral`` supplies the point-in-time behavioral features plus
+    ``TransactionDT``; ``transaction_features`` supplies the categorical
+    transaction fields and the selected C/D benchmark features; ``labels``
+    supplies the fraud target. A single raw transaction frame may be passed for
+    both of the latter arguments, since each selects only the columns it needs.
+
+    Entity identifiers (``card1``, ``addr1``, ``addr2``) stay out of
+    MODEL_FEATURES, and ``TransactionDT`` is retained only for chronological
+    splitting.
+
+    Missingness is treated differently per feature family: behavioral features
+    are computed for every row, so a NaN there means the feature pipeline
+    failed and is rejected. C/D and categorical NaNs are meaningful upstream
+    absences and are preserved for the preprocessing stage to encode.
     """
 
     if "TransactionID" not in behavioral.columns:
         raise ValueError(
             "Behavioral dataframe must contain TransactionID."
+        )
+
+    if "TransactionID" not in transaction_features.columns:
+        raise ValueError(
+            "Transaction feature dataframe must contain TransactionID."
         )
 
     if "TransactionID" not in labels.columns:
@@ -74,7 +115,7 @@ def build_modeling_frame(
     required_behavioral = {
         "TransactionID",
         SPLIT_COLUMN,
-        *MODEL_FEATURES,
+        *BEHAVIORAL_FEATURES,
     }
 
     missing_behavioral = sorted(
@@ -87,9 +128,30 @@ def build_modeling_frame(
             f"{missing_behavioral}"
         )
 
+    required_transaction = {
+        "TransactionID",
+        *CATEGORICAL_FEATURES,
+        *CD_FEATURES,
+    }
+
+    missing_transaction = sorted(
+        required_transaction - set(transaction_features.columns)
+    )
+
+    if missing_transaction:
+        raise ValueError(
+            "Transaction feature dataframe is missing required columns: "
+            f"{missing_transaction}"
+        )
+
     if labels["TransactionID"].duplicated().any():
         raise ValueError(
             "Labels contain duplicate TransactionID values."
+        )
+
+    if transaction_features["TransactionID"].duplicated().any():
+        raise ValueError(
+            "Transaction features contain duplicate TransactionID values."
         )
 
     if behavioral["TransactionID"].duplicated().any():
@@ -108,8 +170,16 @@ def build_modeling_frame(
         )
 
     result = behavioral[
-        ["TransactionID", SPLIT_COLUMN, *MODEL_FEATURES]
+        ["TransactionID", SPLIT_COLUMN, *BEHAVIORAL_FEATURES]
     ].merge(
+        transaction_features[
+            ["TransactionID", *CATEGORICAL_FEATURES, *CD_FEATURES]
+        ],
+        on="TransactionID",
+        how="inner",
+        validate="one_to_one",
+        sort=False,
+    ).merge(
         labels[["TransactionID", TARGET_COLUMN]],
         on="TransactionID",
         how="inner",
@@ -119,7 +189,7 @@ def build_modeling_frame(
 
     if len(result) != len(behavioral):
         raise ValueError(
-            "Label attachment changed the behavioral row count."
+            "Feature and label attachment changed the behavioral row count."
         )
 
     if result[TARGET_COLUMN].isna().any():
@@ -137,9 +207,9 @@ def build_modeling_frame(
             "Modeling frame must remain sorted by TransactionDT."
         )
 
-    if result[MODEL_FEATURES].isna().any().any():
+    if result[BEHAVIORAL_FEATURES].isna().any().any():
         missing_counts = (
-            result[MODEL_FEATURES]
+            result[BEHAVIORAL_FEATURES]
             .isna()
             .sum()
             .loc[lambda series: series > 0]
@@ -147,7 +217,7 @@ def build_modeling_frame(
         )
 
         raise ValueError(
-            "Model features contain missing values: "
+            "Behavioral features contain missing values: "
             f"{missing_counts}"
         )
 

@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from ml.data.modeling import build_modeling_frame
+from ml.data.modeling import (
+    CATEGORICAL_FEATURES,
+    CD_FEATURES,
+    TARGET_COLUMN,
+    build_modeling_frame,
+)
 from ml.models.evaluation import evaluate_predictions, metrics_to_dict
 from ml.models.logistic_baseline import (
     fit_logistic_baseline,
@@ -20,6 +25,13 @@ BEHAVIORAL_PATH = Path(
 TRANSACTION_PATH = Path(
     "data/raw/ieee_cis/train_transaction.csv"
 )
+
+TRANSACTION_COLUMNS = [
+    "TransactionID",
+    TARGET_COLUMN,
+    *CATEGORICAL_FEATURES,
+    *CD_FEATURES,
+]
 
 
 def print_metrics(
@@ -50,24 +62,25 @@ def main() -> None:
 
     print(f"Behavioral rows: {len(behavioral):,}")
 
-    print("\n[2/6] Loading fraud labels...")
-    labels = pd.read_csv(
+    print("\n[2/6] Loading transaction features and fraud labels...")
+    transactions = pd.read_csv(
         TRANSACTION_PATH,
-        usecols=["TransactionID", "isFraud"],
+        usecols=TRANSACTION_COLUMNS,
     )
 
-    print(f"Label rows: {len(labels):,}")
+    print(f"Transaction rows: {len(transactions):,}")
     print(
-        f"Fraud cases: {labels['isFraud'].sum():,}"
+        f"Fraud cases: {transactions[TARGET_COLUMN].sum():,}"
     )
     print(
-        f"Fraud rate: {labels['isFraud'].mean():.3%}"
+        f"Fraud rate: {transactions[TARGET_COLUMN].mean():.3%}"
     )
 
     print("\n[3/6] Building modeling frame...")
     modeling = build_modeling_frame(
-        behavioral,
-        labels,
+        behavioral=behavioral,
+        transaction_features=transactions,
+        labels=transactions,
     )
 
     print(

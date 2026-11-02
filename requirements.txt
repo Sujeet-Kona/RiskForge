@@ -1,0 +1,9 @@
+# RiskForge — Python 3.12
+# Pinned to the versions actually installed in .venv.
+pandas==3.1.0
+numpy==2.5.4
+scikit-learn==1.9.1
+scipy==1.18.1
+pyarrow==26.0.0
+xgboost==3.4.1
+pytest==9.2.0

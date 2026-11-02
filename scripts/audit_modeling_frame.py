@@ -3,6 +3,9 @@ from __future__ import annotations
 import pandas as pd
 
 from ml.data.modeling import (
+    BEHAVIORAL_FEATURES,
+    CATEGORICAL_FEATURES,
+    CD_FEATURES,
     MODEL_FEATURES,
     build_modeling_frame,
 )
@@ -11,6 +14,13 @@ from ml.split.temporal import temporal_split
 
 BEHAVIORAL_PATH = "data/processed/train_behavioral_v1.parquet"
 TRANSACTION_PATH = "data/raw/ieee_cis/train_transaction.csv"
+
+TRANSACTION_COLUMNS = [
+    "TransactionID",
+    "isFraud",
+    *CATEGORICAL_FEATURES,
+    *CD_FEATURES,
+]
 
 
 def main() -> None:
@@ -24,22 +34,23 @@ def main() -> None:
     print(f"Behavioral rows: {len(behavioral):,}")
     print(f"Behavioral columns: {len(behavioral.columns)}")
 
-    print("\n[2/6] Loading fraud labels...")
-    labels = pd.read_csv(
+    print("\n[2/6] Loading transaction features and fraud labels...")
+    transactions = pd.read_csv(
         TRANSACTION_PATH,
-        usecols=["TransactionID", "isFraud"],
+        usecols=TRANSACTION_COLUMNS,
     )
 
-    print(f"Label rows: {len(labels):,}")
-    print(f"Fraud cases: {labels['isFraud'].sum():,}")
+    print(f"Transaction rows: {len(transactions):,}")
+    print(f"Fraud cases: {transactions['isFraud'].sum():,}")
     print(
-        f"Fraud rate: {labels['isFraud'].mean() * 100:.3f}%"
+        f"Fraud rate: {transactions['isFraud'].mean() * 100:.3f}%"
     )
 
     print("\n[3/6] Building modeling frame...")
     modeling = build_modeling_frame(
-        behavioral,
-        labels,
+        behavioral=behavioral,
+        transaction_features=transactions,
+        labels=transactions,
     )
 
     df = modeling.data
@@ -62,8 +73,16 @@ def main() -> None:
     assert df["isFraud"].isin([0, 1]).all()
     print("Target values are 0/1         : PASS")
 
-    assert not df[MODEL_FEATURES].isna().any().any()
-    print("Model features have no NaNs   : PASS")
+    assert not df[BEHAVIORAL_FEATURES].isna().any().any()
+    print("Behavioral features no NaNs   : PASS")
+
+    cd_missing = int(df[CD_FEATURES].isna().sum().sum())
+    categorical_missing = int(
+        df[CATEGORICAL_FEATURES].isna().sum().sum()
+    )
+
+    print(f"C/D NaNs preserved as signal  : {cd_missing:,}")
+    print(f"Categorical NaNs preserved    : {categorical_missing:,}")
 
     assert df["TransactionDT"].is_monotonic_increasing
     print("TransactionDT remains sorted  : PASS")
@@ -88,7 +107,7 @@ def main() -> None:
     print("\n[5/6] Label reconciliation")
     print("-" * 80)
 
-    original_fraud = int(labels["isFraud"].sum())
+    original_fraud = int(transactions["isFraud"].sum())
     modeling_fraud = int(df["isFraud"].sum())
 
     print(f"Original fraud cases : {original_fraud:,}")

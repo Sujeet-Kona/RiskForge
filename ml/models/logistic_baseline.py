@@ -7,7 +7,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 
 from ml.data.modeling import (
     CATEGORICAL_FEATURES,
@@ -15,6 +15,7 @@ from ml.data.modeling import (
     NUMERIC_FEATURES,
     TARGET_COLUMN,
 )
+from ml.models.preprocessing import build_categorical_preprocessor
 
 
 @dataclass(frozen=True)
@@ -26,28 +27,18 @@ class LogisticBaseline:
 
 
 def build_logistic_baseline() -> LogisticBaseline:
-    """Build the first RiskForge fraud-classification baseline."""
+    """Build the first RiskForge fraud-classification baseline.
+
+    Categorical handling is shared with the official XGBoost contract so both
+    models agree on what a missing ``P_emaildomain`` means. Numeric features are
+    additionally standardised, which the linear model requires and the tree model
+    does not.
+    """
 
     numeric_pipeline = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="median")),
             ("scaler", StandardScaler()),
-        ]
-    )
-
-    categorical_pipeline = Pipeline(
-        steps=[
-            (
-                "imputer",
-                SimpleImputer(strategy="most_frequent"),
-            ),
-            (
-                "one_hot",
-                OneHotEncoder(
-                    handle_unknown="ignore",
-                    sparse_output=True,
-                ),
-            ),
         ]
     )
 
@@ -60,7 +51,7 @@ def build_logistic_baseline() -> LogisticBaseline:
             ),
             (
                 "categorical",
-                categorical_pipeline,
+                build_categorical_preprocessor(),
                 CATEGORICAL_FEATURES,
             ),
         ],

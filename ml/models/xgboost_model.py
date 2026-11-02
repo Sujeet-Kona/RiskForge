@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
 from ml.data.modeling import (
@@ -11,11 +12,12 @@ from ml.data.modeling import (
     NUMERIC_FEATURES,
     TARGET_COLUMN,
 )
+from ml.models.preprocessing import build_feature_preprocessor
 
 
 @dataclass(frozen=True)
 class XGBoostFraudModel:
-    model: XGBClassifier
+    model: Pipeline
     feature_columns: list[str]
     categorical_features: list[str]
     numeric_features: list[str]
@@ -23,10 +25,14 @@ class XGBoostFraudModel:
 
 
 def build_xgboost_model(train: pd.DataFrame) -> XGBoostFraudModel:
-    """Build the first nonlinear RiskForge fraud model.
+    """Build the official 28-feature RiskForge fraud model.
+
+    Preprocessing and the classifier are returned as one unfitted pipeline, so
+    a single ``fit`` on the TRAIN partition establishes both the imputation
+    statistics / one-hot vocabulary and the trees. Validation and test data can
+    therefore never influence model construction.
 
     Class imbalance is estimated from the training partition only.
-    Validation and test data must never influence model construction.
     """
     if train.empty:
         raise ValueError("Training dataframe must not be empty.")
@@ -58,7 +64,7 @@ def build_xgboost_model(train: pd.DataFrame) -> XGBoostFraudModel:
 
     scale_pos_weight = negatives / positives
 
-    model = XGBClassifier(
+    classifier = XGBClassifier(
         objective="binary:logistic",
         eval_metric="aucpr",
         n_estimators=300,
@@ -74,8 +80,15 @@ def build_xgboost_model(train: pd.DataFrame) -> XGBoostFraudModel:
         tree_method="hist",
     )
 
+    pipeline = Pipeline(
+        steps=[
+            ("preprocessor", build_feature_preprocessor()),
+            ("classifier", classifier),
+        ]
+    )
+
     return XGBoostFraudModel(
-        model=model,
+        model=pipeline,
         feature_columns=MODEL_FEATURES.copy(),
         categorical_features=CATEGORICAL_FEATURES.copy(),
         numeric_features=NUMERIC_FEATURES.copy(),
@@ -84,7 +97,7 @@ def build_xgboost_model(train: pd.DataFrame) -> XGBoostFraudModel:
 
 
 def fit_xgboost_model(train: pd.DataFrame) -> XGBoostFraudModel:
-    """Fit XGBoost using the training partition only."""
+    """Fit preprocessing and XGBoost using the training partition only."""
     model = build_xgboost_model(train)
 
     X_train = train[model.feature_columns]

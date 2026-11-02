@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from ml.data.modeling import TARGET_COLUMN, build_modeling_frame
+from ml.data.modeling import (
+    CATEGORICAL_FEATURES,
+    CD_FEATURES,
+    TARGET_COLUMN,
+    build_modeling_frame,
+)
 from ml.models.evaluation import evaluate_predictions, metrics_to_dict
 from ml.models.xgboost_model import (
     fit_xgboost_model,
@@ -15,6 +20,13 @@ from ml.split.temporal import temporal_split
 
 BEHAVIORAL_PATH = Path("data/processed/train_behavioral_v1.parquet")
 TRANSACTION_PATH = Path("data/raw/ieee_cis/train_transaction.csv")
+
+TRANSACTION_COLUMNS = [
+    "TransactionID",
+    TARGET_COLUMN,
+    *CATEGORICAL_FEATURES,
+    *CD_FEATURES,
+]
 
 
 def print_metrics(name: str, metrics) -> None:
@@ -42,22 +54,23 @@ def main() -> None:
 
     print(f"Behavioral rows: {len(behavioral):,}")
 
-    print("\n[2/7] Loading fraud labels...")
+    print("\n[2/7] Loading transaction features and fraud labels...")
 
-    labels = pd.read_csv(
+    transactions = pd.read_csv(
         TRANSACTION_PATH,
-        usecols=["TransactionID", TARGET_COLUMN],
+        usecols=TRANSACTION_COLUMNS,
     )
 
-    print(f"Label rows: {len(labels):,}")
-    print(f"Fraud cases: {int(labels[TARGET_COLUMN].sum()):,}")
-    print(f"Fraud rate: {labels[TARGET_COLUMN].mean():.3%}")
+    print(f"Transaction rows: {len(transactions):,}")
+    print(f"Fraud cases: {int(transactions[TARGET_COLUMN].sum()):,}")
+    print(f"Fraud rate: {transactions[TARGET_COLUMN].mean():.3%}")
 
     print("\n[3/7] Building modeling frame...")
 
     modeling = build_modeling_frame(
         behavioral=behavioral,
-        labels=labels,
+        transaction_features=transactions,
+        labels=transactions,
     )
 
     print(f"Modeling rows: {len(modeling.data):,}")
