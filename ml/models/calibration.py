@@ -249,6 +249,9 @@ def cross_validate_calibration(
     if len(groups) != len(raw_probability):
         raise ValueError("groups and raw_probability must have the same length.")
 
+    if not y_true.index.equals(raw_probability.index):
+        raise ValueError("y_true and raw_probability must have matching indexes.")
+
     if not groups.index.equals(raw_probability.index):
         raise ValueError("groups and raw_probability must have matching indexes.")
 
