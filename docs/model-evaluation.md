@@ -212,7 +212,9 @@ datasets and model artifacts are gitignored and should not be committed.
 - Caller-supplied history is not independently authenticated or guaranteed
   complete by the API.
 - Audit rows do not retain all prior-history records needed to replay a score.
-- The reported TEST metrics are one chronological holdout, not confidence
-  intervals or evidence of stable performance across future time periods.
+- The reported TEST point estimates come from one chronological holdout.
+  Paired bootstrap intervals quantify resampling uncertainty within that
+  holdout; they do not establish stability across future time periods or
+  account for temporal dependence and dataset shift.
 - No production deployment, online feature store, drift monitoring or human
   review operation is claimed.
