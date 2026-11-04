@@ -387,8 +387,8 @@ def main() -> None:
 
     for cap in REVIEW_CAP_LEVELS:
         result = search_thresholds(
-            oof_validation,
-            validation_labels,
+            scored_oof_validation,
+            scored_validation_labels,
             PRIMARY_COSTS,
             candidates=candidates,
             max_review_rate=cap,
