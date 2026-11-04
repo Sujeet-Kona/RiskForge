@@ -33,36 +33,57 @@ a score.
 
 ## Architecture
 
-```text
-IEEE-CIS data
-    |
-    v
-Data validation and chronological train / validation / test split
-    |
-    v
-Point-in-time behavioral feature engineering
-    |
-    v
-Train-only preprocessing + XGBoost
-    |
-    v
-Validation-only probability calibration
-    |
-    v
-Frozen cost-sensitive decision policy
-    |
-    v
-SHAP model signals + separate policy reason
-    |
-    v
-FastAPI inference service
-    |
-    v
-PostgreSQL decision audit (application-level append-only)
+The repository has two deliberately separate paths: an offline research and
+artifact-build path, and a lightweight online inference path. The online API
+loads a locked artifact; it never trains or fits calibration during a request.
+
+```mermaid
+flowchart TB
+  subgraph Research["Offline research and artifact build"]
+    D["IEEE-CIS source CSVs"] --> V["Validation and chronological split"]
+    V --> F["Point-in-time behavioral features"]
+    F --> T["TRAIN: preprocessing + XGBoost"]
+    T --> C["VALIDATION: forward-chaining calibration"]
+    C --> P["VALIDATION: policy evaluation"]
+    P --> A["Versioned serving artifact"]
+    V --> E["Benchmark: Logistic / Random Forest / XGBoost"]
+    E --> R["TEST: metrics, segments, bootstrap intervals"]
+  end
+  subgraph Serving["Online inference"]
+    Q["Client transaction + prior history"] --> API["FastAPI schema validation"]
+    API --> FE["28-feature contract"]
+    FE --> M["Load locked artifact: model + calibrator + policy"]
+    M --> S["Fraud probability"]
+    S --> X["SHAP signals + policy reason"]
+    X --> DB["PostgreSQL decision audit"]
+    DB --> RESP["ALLOW / REVIEW / BLOCK response"]
+  end
+  A -. "built offline; loaded at startup" .-> M
 ```
 
-The inference path loads a prebuilt artifact. It does not train, fit a
-calibrator, or contact MLflow while serving requests.
+### Research and release workflow
+
+```mermaid
+flowchart TD
+  A["Obtain IEEE-CIS data locally"] --> B["Inspect and validate source data"]
+  B --> C["Build point-in-time behavioral features"]
+  C --> D["Create chronological TRAIN / VALIDATION / TEST split"]
+  D --> E["Fit candidate models on TRAIN only"]
+  E --> F["Compare on VALIDATION; benchmark TEST once"]
+  F --> G["Select calibration using forward-chaining VALIDATION OOF"]
+  G --> H["Evaluate policy under explicit synthetic costs"]
+  H --> I["Build locked serving artifact"]
+  I --> J["Run offline/API parity verification"]
+  J --> K["Run lint, migration checks and tests"]
+  K --> L["Review docs, reports, limitations and CI"]
+  L --> M["Freeze release; bug fixes only"]
+```
+
+**Important boundaries:** TRAIN fits estimators and preprocessing; VALIDATION
+supports model comparison, calibration and policy research; TEST is reserved
+for final reporting. The benchmark script does not select or tune a model from
+TEST results. The API depends on caller-supplied prior history, and the audit
+table does not retain that history for full score replay.
 
 ## Main engineering decisions
 
@@ -113,9 +134,15 @@ Brier score (0.024703 vs 0.025368 for sigmoid), while sigmoid had better OOF
 log loss and ranking metrics. See [model evaluation](docs/model-evaluation.md)
 for the complete comparison and caveats.
 
-The repository also includes a Logistic Regression baseline implementation.
-No numeric baseline comparison is claimed in this summary until its run output
-is recorded alongside the same split and evaluation protocol.
+The final benchmark compares all three models on the same chronological split and 28-feature contract. All preprocessing and estimators are fitted on TRAIN only; TEST is reserved for final reporting.
+
+| Model | TEST Average Precision | TEST ROC-AUC |
+| --- | ---: | ---: |
+| Logistic Regression | 0.145789 | 0.780255 |
+| Random Forest | 0.426033 | 0.861220 |
+| XGBoost | 0.449254 | 0.865318 |
+
+A paired, class-stratified bootstrap (500 replicates) estimated the XGBoost-minus-Random-Forest difference at **+0.015090 to +0.030551 AP** and **+0.001328 to +0.007241 ROC-AUC** (95% intervals). XGBoost led AP in all four temporal slices, four TRAIN-defined amount bands and three card-history groups, but not every ProductCD slice or every metric. These results describe one chronological holdout; the bootstrap does not model temporal dependence, dataset shift or retraining variability. The generated reports are committed under [reports/model_benchmark](reports/model_benchmark/). See [model evaluation](docs/model-evaluation.md) and the [technical defense guide](docs/technical-defense.md) for methodology and caveats.
 
 ## Repository layout
 
@@ -129,7 +156,7 @@ is recorded alongside the same split and evaluation protocol.
 | `app/` | FastAPI schemas, inference service, API lifecycle |
 | `db/` and `alembic/` | PostgreSQL audit model and migrations |
 | `tracking/` | Local MLflow experiment lineage |
-| `scripts/` | Data, training, evaluation, artifact and parity workflows |
+| `scripts/` | Data, training, evaluation, artifact, parity and final benchmark workflows |
 | `tests/` | Unit, API, database and integration tests |
 | `docs/` | Detailed API, audit, CI, explainability and MLflow notes |
 
@@ -282,7 +309,8 @@ fraud-control product.
 ## Detailed documentation
 
 - [Inference API](docs/api.md)
-- [Model evaluation and measured results](docs/model-evaluation.md)
+- [Model evaluation, three-model benchmark and robustness protocol](docs/model-evaluation.md)
+- [Technical defense guide](docs/technical-defense.md)
 - [Calibration methodology](docs/calibration.md)
 - [Audit persistence](docs/audit.md)
 - [Explainability](docs/explainability.md)

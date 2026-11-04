@@ -19,26 +19,112 @@ The split is chronological, and equal transaction timestamps are kept together.
 Preprocessing and XGBoost are fitted on TRAIN. Calibration method selection and
 policy search use VALIDATION. TEST is reserved for final reporting.
 
-## Model implementations
+## Three-model benchmark and robustness results
 
-The repository contains:
+The final comparison is implemented in `scripts/run_model_benchmark.py`.
+It was executed locally against the IEEE-CIS dataset using the same
+chronological split and 28-feature contract for all three models.
 
-- Logistic Regression baseline: `ml/models/logistic_baseline.py`,
-  executed by `scripts/train_logistic_baseline.py`.
-- XGBoost model: `ml/models/xgboost_model.py`, executed for diagnostic
-  training by `scripts/train_xgboost.py` and rebuilt for serving by
-  `scripts/build_serving_artifact.py`.
+Reproduce it with:
 
-The Logistic Regression baseline uses the same 28-feature contract and
-chronological split, with median imputation, numeric standardization,
-categorical preprocessing and class-balanced fitting.
+```bash
+PYTHONPATH=. python scripts/run_model_benchmark.py
+```
 
-A numeric Logistic Regression-versus-XGBoost comparison is intentionally not
-published here because a verified baseline run output has not been committed.
-Do not claim that XGBoost outperformed the baseline without recording the
-validation metrics from both runs under the same data and evaluation protocol.
-Use VALIDATION for model selection; do not use TEST results to choose a model
-or tune hyperparameters.
+The default bootstrap uses 500 replicates; increase this with
+`--bootstrap-replicates` for a longer run.
+
+### Held-out model comparison
+
+Average Precision (AP) is the primary ranking metric because fraud is rare.
+ROC-AUC is complementary. Brier score and log loss are descriptive diagnostics
+because class weighting can distort raw probability calibration.
+
+| Model | TEST AP | TEST ROC-AUC |
+| --- | ---: | ---: |
+| Logistic Regression | 0.145789 | 0.780255 |
+| Random Forest | 0.426033 | 0.861220 |
+| XGBoost | 0.449254 | 0.865318 |
+
+XGBoost achieved the highest overall TEST AP and ROC-AUC on this fixed
+chronological holdout. This is evidence for this dataset and split, not proof
+that it will generalize best to future payment traffic.
+
+### Paired bootstrap uncertainty
+
+The script uses 500 paired, class-stratified percentile-bootstrap replicates
+with seed `20261104`. The same sampled TEST rows are used for each model.
+
+| Model | TEST AP 95% CI | TEST ROC-AUC 95% CI |
+| --- | --- | --- |
+| Logistic Regression | [0.136244, 0.155149] | [0.770834, 0.789119] |
+| Random Forest | [0.408384, 0.443758] | [0.854032, 0.868409] |
+| XGBoost | [0.430757, 0.467033] | [0.858336, 0.872366] |
+
+| Paired difference | AP difference 95% CI | ROC-AUC difference 95% CI |
+| --- | --- | --- |
+| XGBoost minus Logistic Regression | [+0.287405, +0.318510] | [+0.078614, +0.091628] |
+| XGBoost minus Random Forest | [+0.015090, +0.030551] | [+0.001328, +0.007241] |
+
+These intervals quantify sampling uncertainty under this empirical holdout.
+They do not account for temporal dependence, dataset shift, model retraining
+variability, or threshold-selection uncertainty.
+
+### Segment robustness findings
+
+XGBoost had the highest AP in all four chronological TEST periods:
+
+| Period | XGBoost AP | Random Forest AP |
+| --- | ---: | ---: |
+| 1 | 0.462382 | 0.437336 |
+| 2 | 0.398156 | 0.397353 |
+| 3 | 0.460684 | 0.441258 |
+| 4 | 0.471802 | 0.434679 |
+
+The advantage in period 2 was very small. XGBoost also had higher AP in all
+four TRAIN-defined amount bands and all three prior-24-hour card-history
+groups.
+
+ProductCD results were not uniformly in its favor: Random Forest narrowly
+led AP for category H (0.377120 versus XGBoost 0.376596). XGBoost led AP for
+category S (0.473999 versus Random Forest 0.443186), while Random Forest led
+ROC-AUC for S (0.787611 versus XGBoost 0.762257). H and S have small fraud
+counts, so these differences should not be overinterpreted.
+
+ProductCD W is difficult for both models: XGBoost AP was 0.085566 and Random
+Forest AP was 0.073854. These are descriptive slices of one TEST window,
+not independent future deployments. Segment-level confidence intervals are
+not reported.
+
+### Generated outputs
+
+The benchmark writes files under `reports/model_benchmark/`:
+
+- `model_metrics.csv`: VALIDATION and TEST metrics for all three models.
+- `test_segment_metrics.csv`: TEST results by chronological period,
+  TRAIN-defined amount band, ProductCD and prior 24-hour card activity.
+- `test_bootstrap_intervals.csv`: paired bootstrap intervals and model
+  differences for TEST AP and ROC-AUC.
+- `run_metadata.json`: split, feature contract, model settings, timings,
+  bootstrap seed and execution metadata.
+
+Temporal groups preserve equal timestamps. Amount cut points are calculated
+from TRAIN, not TEST. Segment metrics include sample and fraud counts;
+metrics requiring both classes are unavailable when a segment lacks one.
+
+### Model implementations
+
+- Logistic Regression: `ml/models/logistic_baseline.py`, executed by
+  `scripts/train_logistic_baseline.py`.
+- Random Forest: fixed baseline configuration in
+  `scripts/run_model_benchmark.py`; it is not a tuned optimum.
+- XGBoost: `ml/models/xgboost_model.py`, used by diagnostic training and
+  serving-artifact workflows.
+
+All three benchmark pipelines use the same 28-feature contract and
+chronological partitions. Preprocessing is fitted on TRAIN only. TEST is
+reserved for final reporting and must not be used to select models or tune
+parameters.
 
 ## Calibration method selection
 
@@ -126,7 +212,9 @@ datasets and model artifacts are gitignored and should not be committed.
 - Caller-supplied history is not independently authenticated or guaranteed
   complete by the API.
 - Audit rows do not retain all prior-history records needed to replay a score.
-- The reported TEST metrics are one chronological holdout, not confidence
-  intervals or evidence of stable performance across future time periods.
+- The reported TEST point estimates come from one chronological holdout.
+  Paired bootstrap intervals quantify resampling uncertainty within that
+  holdout; they do not establish stability across future time periods or
+  account for temporal dependence and dataset shift.
 - No production deployment, online feature store, drift monitoring or human
   review operation is claimed.
