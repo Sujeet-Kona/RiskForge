@@ -39,8 +39,8 @@ TRANSACTION_COLUMNS = [
 RELIABILITY_BINS = 10
 
 SELECTION_RULE = (
-    "Selected method = lowest out-of-fold VALIDATION Brier score. "
-    "Pre-registered before any TEST evaluation."
+    "Selected method = lowest forward-chaining out-of-fold VALIDATION Brier "
+    "score, excluding the initial warm-up fold. Pre-registered before TEST."
 )
 
 
@@ -224,8 +224,9 @@ def main() -> None:
     print("STEP C — METHOD SELECTION ON VALIDATION, OUT-OF-FOLD")
     print("=" * 80)
     print(
-        f"Temporal {DEFAULT_CALIBRATION_FOLDS}-fold CV within VALIDATION. "
-        "TEST is not read here."
+        f"Forward-chaining {DEFAULT_CALIBRATION_FOLDS}-fold CV within "
+        "VALIDATION; the first fold is an unscored warm-up period. "
+        "Each scored fold uses only earlier labels. TEST is not read here."
     )
 
     selection: dict[str, object] = {}
@@ -241,9 +242,13 @@ def main() -> None:
             DEFAULT_CALIBRATION_FOLDS,
         )
 
+        scored_rows = out_of_fold.notna()
+        scored_labels = labels["VALIDATION"].loc[scored_rows]
+        scored_probability = out_of_fold.loc[scored_rows]
+
         metrics = evaluate_calibration(
-            labels["VALIDATION"],
-            out_of_fold,
+            scored_labels,
+            scored_probability,
             n_bins=RELIABILITY_BINS,
         )
 
@@ -287,9 +292,14 @@ def main() -> None:
     )
     print_ranking_metrics("RAW XGBOOST — VALIDATION", raw_validation_ranking)
 
+    selected_oof = selection[selected]["out_of_fold"]
+    scored_rows = selected_oof.notna()
+    scored_labels = labels["VALIDATION"].loc[scored_rows]
+    scored_probability = selected_oof.loc[scored_rows]
+
     oof_ranking = evaluate_predictions(
-        labels["VALIDATION"],
-        selection[selected]["out_of_fold"],
+        scored_labels,
+        scored_probability,
     )
     print_ranking_metrics(
         f"OUT-OF-FOLD {selected.upper()} — VALIDATION",
@@ -298,8 +308,8 @@ def main() -> None:
 
     print_reliability_table(
         f"OUT-OF-FOLD {selected.upper()} — VALIDATION",
-        labels["VALIDATION"],
-        selection[selected]["out_of_fold"],
+        scored_labels,
+        scored_probability,
     )
 
     print("\n" + "=" * 80)
