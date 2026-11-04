@@ -1,0 +1,71 @@
+{
+  "dataset": "IEEE-CIS Fraud Detection",
+  "split": "chronological 70/15/15 by distinct TransactionDT values",
+  "feature_count": 28,
+  "features": [
+    "TransactionAmt",
+    "amount_log1p",
+    "transaction_hour_bucket",
+    "transaction_day_mod7",
+    "card_txn_count_1h",
+    "card_txn_count_24h",
+    "card_has_history_1h",
+    "card_has_history_24h",
+    "card_amount_sum_24h",
+    "address_txn_count_1h",
+    "address_txn_count_24h",
+    "address_has_history_1h",
+    "address_amount_sum_24h",
+    "ProductCD",
+    "card6",
+    "P_emaildomain",
+    "R_emaildomain",
+    "C1",
+    "C2",
+    "C11",
+    "C13",
+    "D2",
+    "D3",
+    "D4",
+    "D8",
+    "D10",
+    "D11",
+    "D15"
+  ],
+  "train_rows": 414446,
+  "validation_rows": 88013,
+  "test_rows": 88081,
+  "train_fraud_cases": 14588,
+  "validation_fraud_cases": 3010,
+  "test_fraud_cases": 3065,
+  "random_forest": {
+    "n_estimators": 300,
+    "max_depth": 18,
+    "min_samples_leaf": 10,
+    "max_features": "sqrt",
+    "class_weight": "balanced_subsample",
+    "random_state": 42
+  },
+  "logistic_regression": "existing fixed class_weight=balanced baseline",
+  "xgboost": "existing fixed xgb-001 estimator configuration",
+  "bootstrap": {
+    "replicates": 500,
+    "seed": 20261104,
+    "method": "paired class-stratified percentile bootstrap"
+  },
+  "fit_timings": [
+    {
+      "model": "logistic_regression",
+      "fit_seconds": 5.289807749999454
+    },
+    {
+      "model": "random_forest",
+      "fit_seconds": 66.93643633299871
+    },
+    {
+      "model": "xgboost",
+      "fit_seconds": 3.527542290999918
+    }
+  ],
+  "interpretation": "PR-AUC is the primary ranking metric. Brier/log-loss are descriptive only because class weighting changes score calibration. No model or threshold is selected using TEST."
+}
