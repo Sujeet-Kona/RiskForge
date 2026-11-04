@@ -2,208 +2,242 @@
 
 [![RiskForge CI](https://github.com/Sujeet-Kona/RiskForge/actions/workflows/ci.yml/badge.svg)](https://github.com/Sujeet-Kona/RiskForge/actions/workflows/ci.yml)
 
-**A reproducible fraud-risk scoring research project** built around point-in-time
-features, chronological evaluation, probability calibration, cost-sensitive
-decisions, model explanations, a FastAPI inference service, and PostgreSQL audit
-records.
+**Fraud-risk modeling and transaction decisioning pipeline** built with Python, scikit-learn, XGBoost, FastAPI, and PostgreSQL.
 
-RiskForge uses the IEEE-CIS Fraud Detection dataset as its offline research
-benchmark. It is a portfolio / engineering project, not a deployed payment
-network fraud system and not a claim of production readiness.
+RiskForge uses the IEEE-CIS Fraud Detection dataset to develop and evaluate a transaction-risk model. It builds time-aware behavioral features, compares candidate models, calibrates predicted probabilities, applies a defined decision policy, and serves decisions through an API with local explanations and database audit records.
 
-## What it does
+> **Project scope:** RiskForge is an ML engineering and research project using a public historical dataset. It is not a deployed payment-network fraud system. Its benchmark results do not represent live transaction performance.
 
-Given a transaction and the strictly-prior behavioral history supplied by the
-caller, RiskForge:
+---
 
-1. Builds a fixed 28-feature model input, including rolling card and address
-   activity features.
-2. Scores it with a fitted XGBoost pipeline.
-3. Converts the raw score with an offline-fitted isotonic calibrator.
-4. Applies a frozen decision policy and returns `ALLOW`, `REVIEW`, or
-   `BLOCK`.
-5. Explains model signals separately from the decision rule.
-6. Writes each returned decision to PostgreSQL before returning it.
+## 1. System overview
 
-The API is stateless with respect to transaction history: it does not maintain
-an authoritative history across requests. The caller is responsible for
-supplying complete and trustworthy prior history. The audit table is not used
-as a feature store and does not contain the prior-history rows needed to replay
-a score.
+RiskForge separates offline model development from online transaction scoring.
 
-## Architecture
+- **Offline:** data validation, chronological splitting, feature construction, model training, calibration, policy evaluation, benchmarking, and serving-artifact creation.
+- **Online:** request validation, feature construction, model inference, calibrated risk scoring, decision selection, explanation generation, and PostgreSQL persistence.
 
-The repository has two deliberately separate paths: an offline research and
-artifact-build path, and a lightweight online inference path. The online API
-loads a locked artifact; it never trains or fits calibration during a request.
+The API loads a previously built serving artifact. It does not train, calibrate, or tune a model while handling a transaction.
+
+## 2. Architecture
 
 ```mermaid
 flowchart TB
-  subgraph Research["Offline research and artifact build"]
-    D["IEEE-CIS source CSVs"] --> V["Validation and chronological split"]
-    V --> F["Point-in-time behavioral features"]
-    F --> T["TRAIN: preprocessing + XGBoost"]
-    T --> C["VALIDATION: forward-chaining calibration"]
-    C --> P["VALIDATION: policy evaluation"]
-    P --> A["Versioned serving artifact"]
-    V --> E["Benchmark: Logistic / Random Forest / XGBoost"]
-    E --> R["TEST: metrics, segments, bootstrap intervals"]
+  subgraph OFFLINE["Offline model development"]
+    DATA["IEEE-CIS dataset"] --> VALID["Data validation"]
+    VALID --> SPLIT["Chronological split"]
+    SPLIT --> FEATURES["Point-in-time features"]
+    FEATURES --> TRAIN["Model training"]
+    TRAIN --> BENCH["Candidate model benchmark"]
+    TRAIN --> CAL["Calibration selection on VALIDATION"]
+    CAL --> POLICY["Decision policy evaluation"]
+    POLICY --> ARTIFACT["Versioned serving artifact"]
+    BENCH --> REPORT["Held-out TEST report"]
   end
-  subgraph Serving["Online inference"]
-    Q["Client transaction + prior history"] --> API["FastAPI schema validation"]
-    API --> FE["28-feature contract"]
-    FE --> M["Load locked artifact: model + calibrator + policy"]
-    M --> S["Fraud probability"]
-    S --> X["SHAP signals + policy reason"]
-    X --> DB["PostgreSQL decision audit"]
-    DB --> RESP["ALLOW / REVIEW / BLOCK response"]
+
+  subgraph SERVING["Online inference"]
+    REQUEST["Transaction + prior history"] --> API["FastAPI request validation"]
+    API --> BUILD["28-feature construction"]
+    BUILD --> MODEL["Locked model + calibrator"]
+    MODEL --> SCORE["Calibrated fraud probability"]
+    SCORE --> DECISION["ALLOW / REVIEW / BLOCK"]
+    SCORE --> EXPLAIN["SHAP reason signals"]
+    DECISION --> AUDIT["PostgreSQL decision record"]
+    EXPLAIN --> AUDIT
+    AUDIT --> RESPONSE["Scoring response"]
   end
-  A -. "built offline; loaded at startup" .-> M
+
+  ARTIFACT -. "loaded at startup" .-> MODEL
 ```
 
-### Research and release workflow
+### Main components
+
+| Component | Responsibility |
+|---|---|
+| Data and split pipeline | Validate source data and create chronological partitions |
+| Behavioral features | Build transaction-history features using strictly earlier events |
+| Model pipeline | Preprocessing and fraud-probability estimation |
+| Calibration | Convert model scores into calibrated probabilities |
+| Decision policy | Map probability bands to ALLOW, REVIEW, or BLOCK |
+| Explanation layer | Produce model-signal reason codes and a separate policy explanation |
+| FastAPI service | Validate requests and orchestrate inference |
+| PostgreSQL | Persist scoring decisions and associated metadata |
+| MLflow | Track offline experiments; it is not in the request-time scoring path |
+
+## 3. End-to-end workflow
 
 ```mermaid
 flowchart TD
-  A["Obtain IEEE-CIS data locally"] --> B["Inspect and validate source data"]
-  B --> C["Build point-in-time behavioral features"]
-  C --> D["Create chronological TRAIN / VALIDATION / TEST split"]
-  D --> E["Fit candidate models on TRAIN only"]
-  E --> F["Compare on VALIDATION; benchmark TEST once"]
-  F --> G["Select calibration using forward-chaining VALIDATION OOF"]
-  G --> H["Evaluate policy under explicit synthetic costs"]
-  H --> I["Build locked serving artifact"]
-  I --> J["Run offline/API parity verification"]
-  J --> K["Run lint, migration checks and tests"]
-  K --> L["Review docs, reports, limitations and CI"]
-  L --> M["Freeze release; bug fixes only"]
+  A["IEEE-CIS source files"] --> B["Inspect and validate data"]
+  B --> C["Chronological TRAIN / VALIDATION / TEST split"]
+  C --> D["Build point-in-time behavioral features"]
+  D --> E["Fit candidate models on TRAIN"]
+  E --> F["Compare candidates on held-out TEST"]
+  E --> G["Generate forward-chaining VALIDATION predictions"]
+  G --> H["Select probability calibration"]
+  H --> I["Evaluate decision thresholds on VALIDATION"]
+  I --> J["Build locked serving artifact"]
+  J --> K["Load artifact in FastAPI"]
+  K --> L["Score transaction and persist decision"]
 ```
 
-**Important boundaries:** TRAIN fits estimators and preprocessing; VALIDATION
-supports model comparison, calibration and policy research; TEST is reserved
-for final reporting. The benchmark script does not select or tune a model from
-TEST results. The API depends on caller-supplied prior history, and the audit
-table does not retain that history for full score replay.
+The TEST partition is used for final reporting, not for fitting preprocessing, model parameters, calibration, or policy thresholds.
 
-## Main engineering decisions
+## 4. Temporal features and leakage control
 
-- **Point-in-time correctness:** only transactions with an earlier
-  `TransactionDT` may contribute to a transaction's behavioral features.
-  Transactions sharing a timestamp cannot see one another.
-- **Chronological evaluation:** train, validation, and test partitions are
-  ordered in time; equal timestamps are kept together.
-- **Fit boundaries:** preprocessing and the classifier are fitted on TRAIN;
-  calibration and policy selection use VALIDATION; TEST is reserved for final
-  evaluation.
-- **Explicit policy:** model probability and business decision are separate.
-  The cost assumptions are synthetic project assumptions, not measured
-  payment-network economics.
-- **Explainability:** SHAP-derived model signals are not conflated with the
-  threshold rule that produced the final action.
-- **Auditability:** a successful API response is returned only after its
-  decision record has been written.
+Fraud-risk features often depend on previous activity. A feature calculation that accidentally includes future transactions would produce misleading evaluation results.
 
-## Measured benchmark results
+RiskForge applies these constraints:
 
-The following results were reproduced locally on the IEEE-CIS benchmark. The
-dataset and fitted artifacts are not committed; CI tests the application and
-invariants but does not retrain the model.
+- Historical features use transactions strictly earlier than the transaction being scored.
+- Transactions with equal timestamps do not use one another as prior history.
+- Chronological partitions keep equal `TransactionDT` values together.
+- Preprocessing and estimators are fitted on TRAIN.
+- Calibration and decision-policy research use VALIDATION.
+- TEST is held back for final model and benchmark reporting.
 
-| Partition | Rows | Fraud cases |
-| --- | ---: | ---: |
-| TRAIN | 414,446 | — |
-| VALIDATION | 88,013 | 3,010 |
-| TEST | 88,081 | 3,065 |
+The serving API expects the caller to provide the relevant prior history. It does not maintain or independently verify a complete transaction-history stream.
 
-The 28-feature XGBoost model produced the following held-out TEST ranking
-metrics. Isotonic calibration was selected using forward-chaining validation
-OOF Brier score; the calibrated TEST metrics are reported separately from the
-raw model scores.
+## 5. Model evaluation
 
-| TEST metric | Raw XGBoost | Isotonic calibrated |
-| --- | ---: | ---: |
-| PR-AUC | 0.449254 | 0.438919 |
-| ROC-AUC | 0.865318 | 0.864850 |
-| Brier score | — | 0.024204 |
-| Log loss | — | 0.102851 |
-| ECE | — | 0.003553 |
+The modeling frame contains 590,540 transactions and 28 features.
 
-Calibration method selection used 70,334 forward-chaining OOF VALIDATION rows;
-17,679 initial warm-up rows were excluded. Isotonic achieved the lower OOF
-Brier score (0.024703 vs 0.025368 for sigmoid), while sigmoid had better OOF
-log loss and ranking metrics. See [model evaluation](docs/model-evaluation.md)
-for the complete comparison and caveats.
+| Partition | Rows |
+|---|---:|
+| TRAIN | 414,446 |
+| VALIDATION | 88,013 |
+| TEST | 88,081 |
 
-The final benchmark compares all three models on the same chronological split and 28-feature contract. All preprocessing and estimators are fitted on TRAIN only; TEST is reserved for final reporting.
+### Candidate model comparison
 
-| Model | TEST Average Precision | TEST ROC-AUC |
-| --- | ---: | ---: |
-| Logistic Regression | 0.145789 | 0.780255 |
-| Random Forest | 0.426033 | 0.861220 |
-| XGBoost | 0.449254 | 0.865318 |
+All candidates use the same chronological split and feature contract.
 
-A paired, class-stratified bootstrap (500 replicates) estimated the XGBoost-minus-Random-Forest difference at **+0.015090 to +0.030551 AP** and **+0.001328 to +0.007241 ROC-AUC** (95% intervals). XGBoost led AP in all four temporal slices, four TRAIN-defined amount bands and three card-history groups, but not every ProductCD slice or every metric. These results describe one chronological holdout; the bootstrap does not model temporal dependence, dataset shift or retraining variability. The generated reports are committed under [reports/model_benchmark](reports/model_benchmark/). See [model evaluation](docs/model-evaluation.md) and the [technical defense guide](docs/technical-defense.md) for methodology and caveats.
+| Model | Average Precision | ROC-AUC | Brier score | Log loss |
+|---|---:|---:|---:|---:|
+| Logistic Regression | 0.145789 | 0.780255 | 0.178173 | 0.538330 |
+| Random Forest | 0.426033 | 0.861220 | **0.077925** | **0.296063** |
+| XGBoost | **0.449254** | **0.865318** | 0.101228 | 0.344462 |
 
-## Repository layout
+Average Precision is emphasized because fraud is the minority class. XGBoost had the highest TEST Average Precision and ROC-AUC in this benchmark; Random Forest had better Brier score and log loss before calibration.
 
-| Path | Responsibility |
-| --- | --- |
-| `ml/features/` | Point-in-time feature engineering |
-| `ml/split/` | Chronological data partitioning |
-| `ml/models/` | Preprocessing, Logistic Regression baseline, XGBoost, calibration, artifact handling |
-| `policy/` | Decision policy, cost assumptions, policy evaluation |
-| `explain/` | Model attribution and reason-code taxonomy |
-| `app/` | FastAPI schemas, inference service, API lifecycle |
-| `db/` and `alembic/` | PostgreSQL audit model and migrations |
-| `tracking/` | Local MLflow experiment lineage |
-| `scripts/` | Data, training, evaluation, artifact, parity and final benchmark workflows |
-| `tests/` | Unit, API, database and integration tests |
-| `docs/` | Detailed API, audit, CI, explainability and MLflow notes |
+A paired, class-stratified bootstrap with 500 replicates estimated the XGBoost-minus-Random-Forest differences as:
 
-## Requirements
+| Metric | Difference | 95% interval |
+|---|---:|---:|
+| Average Precision | +0.023220 | +0.015090 to +0.030551 |
+| ROC-AUC | +0.004098 | +0.001328 to +0.007241 |
+
+These intervals describe resampling uncertainty within this TEST holdout. They do not account for temporal dependence, dataset shift, retraining variability, or threshold-selection uncertainty.
+
+See [model evaluation](docs/model-evaluation.md) for calibration results, subgroup analysis, policy research, and interpretation limits.
+
+## 6. Probability calibration and decision policy
+
+Calibration and decisioning are separate stages.
+
+1. The model estimates a fraud score.
+2. The selected calibrator maps the score to a probability.
+3. The decision policy maps that probability to an action.
+
+Isotonic calibration was selected using forward-chaining VALIDATION predictions and Brier score as the selection criterion. It improved the selected probability-quality criterion, but slightly reduced ranking metrics on TEST. It did not outperform every alternative on every metric.
+
+The active serving policy is `policy-001`:
+
+| Action | Calibrated probability |
+|---|---|
+| ALLOW | below 0.075 |
+| REVIEW | 0.075 to below 0.110 |
+| BLOCK | 0.110 or above |
+
+Policy costs and review-effectiveness assumptions are synthetic project inputs, not measured payment-network operating costs. A separately evaluated candidate policy has not been promoted to serving.
+
+## 7. Inference and audit flow
+
+For each scoring request:
+
+1. FastAPI validates the transaction and supplied history.
+2. The feature layer constructs the shared 28-feature input.
+3. The loaded artifact produces a model score and calibrated probability.
+4. The frozen policy selects ALLOW, REVIEW, or BLOCK.
+5. The explanation layer returns model-signal reason codes and a separate policy explanation.
+6. The service writes the decision record to PostgreSQL before returning success.
+
+### API surface
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | Service and dependency health |
+| POST | `/v1/risk/score` | Score one transaction using supplied prior history |
+
+The interactive API schema is available at `/docs` when the service is running locally.
+
+### Explanation boundary
+
+SHAP values describe contributions to the model output; they are not causal explanations. The policy explanation describes which probability threshold band produced the action. These are returned as distinct pieces of information.
+
+## 8. Technology stack
+
+| Area | Technology |
+|---|---|
+| Language | Python 3.12 |
+| Data processing | pandas, NumPy |
+| Machine learning | scikit-learn, XGBoost |
+| Calibration and metrics | scikit-learn |
+| Explainability | SHAP |
+| API | FastAPI, Pydantic, Uvicorn |
+| Database | PostgreSQL 17, SQLAlchemy, Alembic |
+| Experiment tracking | MLflow |
+| Testing and quality | pytest, Ruff |
+| CI | GitHub Actions |
+| Local infrastructure | Docker Compose |
+
+## 9. Repository layout
+
+```text
+RiskForge/
+├── app/                  # FastAPI application and request handling
+├── db/                   # Database models and persistence
+├── alembic/              # Database migrations
+├── ml/                   # Data, features, splits, models, calibration
+├── policy/               # Decision policy and policy evaluation
+├── explain/              # SHAP signals and reason-code mapping
+├── tracking/             # Offline MLflow experiment tracking
+├── scripts/              # Data, benchmark, artifact, and parity workflows
+├── tests/                # Unit, API, database, and integration tests
+├── docs/                 # Evaluation, design, and reproducibility notes
+└── reports/              # Committed benchmark outputs
+```
+
+## 10. Run locally
+
+### Requirements
 
 - Python 3.12
-- PostgreSQL 17 for the full test suite and API audit persistence
-- Docker Compose (optional; used to run local PostgreSQL)
-- IEEE-CIS Fraud Detection data for the offline data and model workflows
+- Docker and Docker Compose
+- PostgreSQL 17 (provided by the Compose setup)
+- IEEE-CIS dataset files for offline model workflows
 
-The dataset and generated artifacts are intentionally not committed. Obtain the
-IEEE-CIS data through its official Kaggle competition page and place the source
-CSV files under `data/raw/ieee_cis/` as expected by the scripts. Generated
-behavioral data, MLflow runs and model artifacts remain local and are gitignored.
-
-## Local setup
-
-Clone the repository, then from its root:
+### Environment setup
 
 ```bash
+git clone https://github.com/Sujeet-Kona/RiskForge.git
+cd RiskForge
+
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+
 cp .env.example .env
-```
-
-Start the local PostgreSQL service:
-
-```bash
 docker compose up -d
-```
-
-The committed `.env.example` contains development-only database credentials.
-Do not use those defaults outside a local environment. Configure
-`DATABASE_URL` in your local `.env` if your PostgreSQL settings differ.
-
-Apply the audit schema:
-
-```bash
 .venv/bin/alembic upgrade head
 ```
 
-## Data and model workflow
+Download the IEEE-CIS dataset from the Kaggle competition and place its source CSV files under `data/raw/ieee_cis/`. Dataset files and generated model artifacts are not committed.
 
-After placing the required IEEE-CIS CSV files in `data/raw/ieee_cis/`, run the
-offline stages from the repository root:
+### Build the offline artifacts
+
+Run from the repository root:
 
 ```bash
 PYTHONPATH=. python scripts/inspect_dataset.py
@@ -213,56 +247,25 @@ PYTHONPATH=. python scripts/select_decision_policy.py
 PYTHONPATH=. python scripts/build_serving_artifact.py
 ```
 
-These scripts are explicit research workflows, not an automated production
-training service. The serving-artifact builder enforces the locked model and
-calibration configuration described in the source and documentation. Keep the
-generated files local; do not commit dataset files or fitted model binaries.
-
-For the Logistic Regression baseline diagnostic, run:
+Run the candidate benchmark separately:
 
 ```bash
-PYTHONPATH=. python scripts/train_logistic_baseline.py
+PYTHONPATH=. python scripts/run_model_benchmark.py
 ```
 
-For experiment lineage, see [docs/mlflow.md](docs/mlflow.md). For the exact
-inference contract and artifact lifecycle, see [docs/api.md](docs/api.md).
-Use VALIDATION for model comparisons; do not tune or select models using TEST.
-See [model evaluation](docs/model-evaluation.md) for the recorded benchmark.
-
-## Run the inference API
-
-With PostgreSQL running, the migration applied, and the serving artifact built:
+### Start the API
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Interactive API documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+Open http://127.0.0.1:8000/docs for the interactive API documentation.
 
-Example request:
+The scoring endpoint returns `503` if the serving artifact is missing or invalid. The API does not train a replacement artifact at request time.
 
-```bash
-curl -X POST http://127.0.0.1:8000/v1/risk/score \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "transaction": {
-      "TransactionID": "demo-001",
-      "TransactionDT": 1000000,
-      "TransactionAmt": 42.50,
-      "card1": 12345
-    },
-    "history": [],
-    "top_k": 3
-  }'
-```
+## 11. Tests and verification
 
-The example is structurally valid; a meaningful score requires a locally built
-serving artifact. The API returns `503` if the artifact is missing or invalid.
-Every successful decision is persisted before the response is returned.
-
-## Tests and CI
-
-Run the checks from the repository root with PostgreSQL available:
+With PostgreSQL running and migrations applied:
 
 ```bash
 .venv/bin/python -m ruff check .
@@ -272,61 +275,30 @@ Run the checks from the repository root with PostgreSQL available:
 RISKFORGE_REQUIRE_POSTGRES=1 .venv/bin/python -m pytest -q
 ```
 
-GitHub Actions runs Ruff, Python compilation, Alembic migration/schema checks,
-and the full pytest suite against PostgreSQL 17. CI validates the committed
-application and tests; it does not download IEEE-CIS data, train the model,
-rebuild the serving artifact, or deploy the API. See [docs/ci.md](docs/ci.md).
+To compare offline and API scoring paths after building the serving artifact:
 
-## Evaluation and limitations
+```bash
+PYTHONPATH=. python scripts/verify_serving_parity.py
+```
 
-RiskForge separates measured dataset results from project assumptions:
+The recorded local parity check compared three validation transactions representing ALLOW, REVIEW, and BLOCK. All 28 feature values and the resulting probabilities, decisions, reason codes, and policy explanations matched within the documented numeric tolerance. This is a targeted three-case check, not exhaustive proof for all possible inputs.
 
-- IEEE-CIS metrics describe performance on the held-out chronological
-  benchmark partition, not future production traffic.
-- The false-positive, false-negative and review costs used for policy selection
-  are synthetic assumptions. The resulting thresholds are experimental.
-- The active serving policy remains `policy-001`
-  (`T_REVIEW = 0.075`, `T_BLOCK = 0.110`). The corrected forward-chaining
-  policy-selection workflow produces an experimental `candidate`; it does not
-  change the serving policy. Candidate thresholds have not been promoted or
-  revalidated as the active policy. See
-  [calibration methodology](docs/calibration.md).
-- The service relies on caller-provided history and cannot independently
-  guarantee that history is complete, current or authentic.
-- Audit records preserve the scored transaction inputs and decision details,
-  but not the full prior-history rows; they are not sufficient to replay a score.
-- Audit append-only behaviour is enforced by application convention, not database
-  privileges or triggers. Request idempotency and duplicate suppression are not
-  implemented; repeated transaction IDs can produce multiple audit rows.
-- The repository does not provide authentication, TLS termination, rate
-  limiting, production secrets management, deployment automation, drift
-  monitoring, or an operational review workflow.
+GitHub Actions checks lint, compilation, migrations/schema consistency, and tests against PostgreSQL 17. CI does not download IEEE-CIS, train models, build the serving artifact, run real-data parity, or deploy the API.
 
-These constraints are intentional and documented. RiskForge is an engineering
-demonstration of a fraud-risk ML lifecycle and serving boundary, not a certified
-fraud-control product.
+## 12. Limitations
 
-## Detailed documentation
+- Results are based on one chronological holdout from a public historical dataset; they do not establish performance on current payment traffic.
+- The API trusts caller-supplied history and cannot verify its completeness, freshness, authenticity, or entity association.
+- Audit rows do not store all prior-history records needed to replay a score.
+- Append-only audit behavior is an application convention, not database-enforced immutability.
+- Request idempotency and duplicate suppression are not implemented.
+- Policy costs and review assumptions are synthetic.
+- Authentication, TLS termination, rate limiting, production deployment, drift monitoring, and a human-review operation are outside the current implementation.
 
-- [Inference API](docs/api.md)
-- [Model evaluation, three-model benchmark and robustness protocol](docs/model-evaluation.md)
-- [Technical defense guide](docs/technical-defense.md)
-- [Calibration methodology](docs/calibration.md)
-- [Audit persistence](docs/audit.md)
-- [Explainability](docs/explainability.md)
-- [MLflow lifecycle tracking](docs/mlflow.md)
-- [CI design and verification scope](docs/ci.md)
+---
 
-## Resume-ready project summary
+## Further documentation
 
-**RiskForge — Fraud Risk Scoring & Decision Engine**
-
-- Built a reproducible fraud-risk ML pipeline over 590,540 IEEE-CIS transactions using 28 point-in-time behavioral features, chronological evaluation, XGBoost, forward-chaining probability calibration, and SHAP-based explanations.
-- Evaluated the calibrated model on a held-out chronological TEST partition, achieving **0.4389 PR-AUC**, **0.8649 ROC-AUC**, **0.0242 Brier score**, and **0.0036 ECE**. Calibration method selection used forward-chaining VALIDATION OOF predictions; see the evaluation report for trade-offs and limitations.
-- Implemented a FastAPI scoring service with a versioned model artifact and PostgreSQL decision auditing; manually verified offline/API parity on three representative ALLOW, REVIEW, and BLOCK cases, with all 28 features, probabilities, decisions, and reason codes matching.
-
-These bullets describe the current repository and measured benchmark only. They do not imply a deployed payment-network system, production traffic performance, an authoritative transaction-history service, or database-enforced immutable audit storage.
-
-## Release verification
-
-The manual release checks and the latest observed offline/API parity result are recorded in [release verification](docs/release-verification.md). CI status is available from the badge at the top of this README; CI does not train on IEEE-CIS or run the artifact parity replay.
+- [Model evaluation](docs/model-evaluation.md) — benchmark methodology, calibration, policy selection, and uncertainty.
+- [System design](docs/system-design.md) — API flow, feature-history contract, explanations, audit persistence, and MLflow boundary.
+- [Reproducibility](docs/reproducibility.md) — local workflow, tests, CI scope, and parity verification.
