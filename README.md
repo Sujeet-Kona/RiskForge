@@ -228,6 +228,7 @@ fraud-control product.
 ## Detailed documentation
 
 - [Inference API](docs/api.md)
+- [Calibration methodology](docs/calibration.md)
 - [Audit persistence](docs/audit.md)
 - [Explainability](docs/explainability.md)
 - [MLflow lifecycle tracking](docs/mlflow.md)
