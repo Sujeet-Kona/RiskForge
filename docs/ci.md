@@ -180,3 +180,27 @@ Use the repository interpreter. The active shell may show both `(.venv)` and
 Ruff must report `0.17.3`. `alembic current` must show `7eccd8f63a8c`.
 To reproduce the CI rule that database tests cannot skip, set
 `RISKFORGE_REQUIRE_POSTGRES=1` in the environment before pytest.
+
+
+---
+
+## 8. Protecting the default branch
+
+A successful workflow run is useful evidence, but it is not a merge gate while
+branch protection is disabled. The repository owner should configure a rule for
+`main` in GitHub repository settings:
+
+1. Open **Settings → Branches** (or the repository's Rulesets settings).
+2. Add a branch protection rule targeting `main`.
+3. Require a pull request before merging.
+4. Require the `Lint, migrate, and test` status check from **RiskForge CI**.
+5. Require the branch to be up to date before merging, if that option is
+   available for the selected rule type.
+6. Disable force pushes and branch deletion for `main`.
+
+The CI job name is `Lint, migrate, and test`. Confirm the exact status-check
+name shown by GitHub after the workflow has run on the protected branch.
+
+This repository connection can inspect branch protection but does not expose
+the administrative write operation needed to change it. The rule must be
+enabled by a repository administrator in GitHub settings.
