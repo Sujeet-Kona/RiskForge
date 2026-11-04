@@ -41,11 +41,19 @@ not an unbiased estimate of deployed policy cost. The frozen TEST evaluation is
 the final held-out check for the resulting model/calibrator/policy combination.
 
 The thresholds currently stored in `policy/locked.py` predate this corrected
-forward-chaining validation protocol. They must be compared with the new output
-from `scripts/select_decision_policy.py` on the local IEEE-CIS data. If the
-selected thresholds change, update the locked policy constants, policy version,
-related tests and serving artifact together; do not silently keep the old lock
-and describe it as newly validated.
+forward-chaining validation protocol. The output from
+`scripts/select_decision_policy.py` is an experimental candidate, stamped
+`policy_version = candidate`; it does not modify or replace the frozen serving
+policy. The active serving policy remains `policy-001` with
+`T_REVIEW = 0.075` and `T_BLOCK = 0.110`.
+
+A candidate must not be promoted automatically because it has the lowest cost
+under the project's synthetic assumptions. Promotion requires a separate,
+documented review of the assumptions, threshold stability, calibration-scale
+mismatch, operational constraints and held-out evaluation. Only after that
+review should the locked policy version, constants, tests and serving artifact
+be changed together. Until then, keep `policy-001` as the active serving policy
+and do not describe its thresholds as revalidated under the corrected protocol.
 
 The locked serving-artifact builder currently specifies isotonic calibration.
 After changing the validation protocol, rerun

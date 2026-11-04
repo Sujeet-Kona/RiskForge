@@ -7,7 +7,7 @@ import pytest
 from policy.costs import CostAssumptions
 from policy.decision import Decision, DecisionPolicy, PolicyConfig
 from policy.evaluation import (
-    DEFAULT_POLICY_VERSION,
+    CANDIDATE_POLICY_VERSION,
     candidate_thresholds,
     degenerate_baseline_costs,
     evaluate_policy,
@@ -353,15 +353,15 @@ def test_search_stamps_the_requested_policy_version():
     assert result.outcome.policy_version == "policy-007"
 
 
-def test_search_defaults_to_policy_001():
+def test_search_defaults_to_candidate_version():
     probability, y_true = make_realistic_partition(n=300)
 
     result = search_thresholds(probability, y_true, COSTS)
 
-    assert result.config.policy_version == DEFAULT_POLICY_VERSION == "policy-001"
+    assert result.config.policy_version == CANDIDATE_POLICY_VERSION == "candidate"
 
 
-def test_search_carries_the_cost_configuration_into_the_frozen_policy():
+def test_search_carries_the_cost_configuration_into_the_candidate_policy():
     probability, y_true = make_realistic_partition(n=300)
 
     result = search_thresholds(probability, y_true, COSTS)

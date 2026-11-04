@@ -24,7 +24,7 @@ from ml.models.xgboost_model import fit_xgboost_model, predict_fraud_probability
 from ml.split.temporal import temporal_split
 from policy.costs import ASSUMPTION_NOTICE, EXPERIMENTAL_COST_ASSUMPTIONS
 from policy.evaluation import (
-    DEFAULT_POLICY_VERSION,
+    CANDIDATE_POLICY_VERSION,
     candidate_thresholds,
     degenerate_baseline_costs,
     evaluate_policy,
@@ -258,7 +258,7 @@ def main() -> None:
         scored_validation_labels,
         PRIMARY_COSTS,
         candidates=candidates,
-        policy_version=DEFAULT_POLICY_VERSION,
+        policy_version=CANDIDATE_POLICY_VERSION,
         runner_up_count=RUNNER_UP_COUNT,
     )
     search_seconds = time.perf_counter() - search_started
@@ -275,18 +275,18 @@ def main() -> None:
         print(f"  {name:14s}: {cost:,.2f} total  "
               f"({cost / len(scored_validation_labels):.4f} per transaction)")
 
-    frozen_config = search.config
-    frozen_review = frozen_config.review_threshold
-    frozen_block = frozen_config.block_threshold
+    candidate_config = search.config
+    candidate_review = candidate_config.review_threshold
+    candidate_block = candidate_config.block_threshold
 
-    print_section(f"SELECTED POLICY — {frozen_config.policy_version} (FROZEN)")
-    print(f"T_REVIEW = {frozen_review:.6f}")
-    print(f"T_BLOCK  = {frozen_block:.6f}")
-    print(f"policy_version = {frozen_config.policy_version}")
-    print(f"C_FN={frozen_config.costs.false_negative_cost}, "
-          f"C_FP={frozen_config.costs.false_positive_cost}, "
-          f"C_REVIEW={frozen_config.costs.review_cost}, "
-          f"e={frozen_config.costs.review_fraud_capture_rate}")
+    print_section(f"SELECTED CANDIDATE — {candidate_config.policy_version}")
+    print(f"T_REVIEW = {candidate_review:.6f}")
+    print(f"T_BLOCK  = {candidate_block:.6f}")
+    print(f"policy_version = {candidate_config.policy_version}")
+    print(f"C_FN={candidate_config.costs.false_negative_cost}, "
+          f"C_FP={candidate_config.costs.false_positive_cost}, "
+          f"C_REVIEW={candidate_config.costs.review_cost}, "
+          f"e={candidate_config.costs.review_fraud_capture_rate}")
     print(
         "\nWhy it won: it is the global minimum of expected VALIDATION cost "
         "over the entire feasible threshold grid under the stated ASSUMPTION "
@@ -304,7 +304,7 @@ def main() -> None:
     print_section("COMPETING POLICIES (next-best on VALIDATION cost)")
     print(f"{'rank':>4s}  {'T_REVIEW':>9s}  {'T_BLOCK':>9s}  {'cost':>14s}  "
           f"{'per_txn':>9s}  {'review%':>8s}  {'block%':>7s}  {'capture':>8s}")
-    print(f"{'WIN':>4s}  {frozen_review:9.6f}  {frozen_block:9.6f}  "
+    print(f"{'WIN':>4s}  {candidate_review:9.6f}  {candidate_block:9.6f}  "
           f"{search.outcome.total_expected_cost:14,.2f}  "
           f"{search.outcome.expected_cost_per_transaction:9.4f}  "
           f"{search.outcome.review_rate:8.4%}  "
@@ -319,7 +319,7 @@ def main() -> None:
               f"{runner.review_rate:8.4%}  {runner.block_rate:7.4%}  "
               f"{runner.fraud_capture_rate:8.4%}")
 
-    print_section("STEP 6 — VALIDATION RESULTS FOR THE FROZEN POLICY")
+    print_section("STEP 6 — VALIDATION RESULTS FOR THE SELECTED CANDIDATE")
     print(
         "Measured on forward-chaining out-of-fold VALIDATION probabilities "
         "(initial warm-up fold excluded), the same rows used for threshold "
@@ -327,7 +327,7 @@ def main() -> None:
     )
 
     print_outcome(
-        f"{frozen_config.policy_version} — VALIDATION (forward out-of-fold)",
+        f"{candidate_config.policy_version} — VALIDATION (forward out-of-fold)",
         search.outcome,
     )
 
@@ -336,9 +336,9 @@ def main() -> None:
         raw_validation,
     )
     print_outcome(
-        f"{frozen_config.policy_version} — VALIDATION (in-sample refit, "
+        f"{candidate_config.policy_version} — VALIDATION (in-sample refit, "
         "OPTIMISTIC, report only)",
-        evaluate_policy(frozen_config, validation_labels, refit_validation),
+        evaluate_policy(candidate_config, validation_labels, refit_validation),
     )
 
     print_section("STEP 6A — SENSITIVITY: REVIEW EFFECTIVENESS e (report only)")
@@ -360,7 +360,7 @@ def main() -> None:
             scored_validation_labels,
             costs,
             candidates=candidates,
-            policy_version=DEFAULT_POLICY_VERSION,
+            policy_version=CANDIDATE_POLICY_VERSION,
             runner_up_count=0,
         )
         outcome = result.outcome
@@ -392,7 +392,7 @@ def main() -> None:
             PRIMARY_COSTS,
             candidates=candidates,
             max_review_rate=cap,
-            policy_version=DEFAULT_POLICY_VERSION,
+            policy_version=CANDIDATE_POLICY_VERSION,
             runner_up_count=0,
         )
         outcome = result.outcome
@@ -404,17 +404,17 @@ def main() -> None:
               f"{outcome.fraud_capture_rate:8.4%}  "
               f"{outcome.total_expected_cost - primary_cost:+12,.2f}")
 
-    print_section("STEP 7 — FREEZE AND DOCUMENT")
-    print(f"FROZEN: {frozen_config.policy_version} "
-          f"T_REVIEW={frozen_review:.6f} T_BLOCK={frozen_block:.6f}")
+    print_section("STEP 7 — RECORD CANDIDATE AND DOCUMENT")
+    print(f"CANDIDATE: {candidate_config.policy_version} "
+          f"T_REVIEW={candidate_review:.6f} T_BLOCK={candidate_block:.6f}")
     print(
-        "The thresholds above are now fixed. Nothing below can change them. "
+        "The candidate thresholds are recorded above. TEST evaluation below does not modify them. "
         "TEST labels have not been read by any selection step."
     )
     print("\nMETHODOLOGICAL NUANCE (acknowledged limitation)")
     print(METHOD_NOTE)
 
-    print_header("8/8", "SINGLE TEST EVALUATION OF THE FROZEN POLICY")
+    print_header("8/8", "SINGLE TEST EVALUATION OF THE SELECTED CANDIDATE")
 
     test_labels = split.test[TARGET_COLUMN]
 
@@ -467,19 +467,19 @@ def main() -> None:
     print(f"calibrated TEST ROC-AUC : {calibrated_test_ranking.roc_auc:.6f}")
 
     test_outcome = evaluate_policy(
-        frozen_config, test_labels, calibrated_test
+        candidate_config, test_labels, calibrated_test
     )
 
     print_section("DECISION POLICY — TEST (final held-out, evaluated once)")
-    print_outcome(f"{frozen_config.policy_version} — TEST", test_outcome)
+    print_outcome(f"{candidate_config.policy_version} — TEST", test_outcome)
 
     print("\nThresholds are unchanged after seeing TEST:")
-    print(f"  before TEST: T_REVIEW={frozen_review:.6f} T_BLOCK={frozen_block:.6f}")
+    print(f"  before TEST: T_REVIEW={candidate_review:.6f} T_BLOCK={candidate_block:.6f}")
     print(f"  after TEST : T_REVIEW={test_outcome.review_threshold:.6f} "
           f"T_BLOCK={test_outcome.block_threshold:.6f}")
 
-    if (test_outcome.review_threshold != frozen_review
-            or test_outcome.block_threshold != frozen_block):
+    if (test_outcome.review_threshold != candidate_review
+            or test_outcome.block_threshold != candidate_block):
         raise AssertionError("Thresholds were modified after TEST evaluation.")
 
     print_section("LEAKAGE AUDIT")
