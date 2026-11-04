@@ -28,9 +28,45 @@ Raw identifiers such as card and address keys are used to group prior activity w
 
 ### Why 28 features?
 
-The contract contains 13 behavioral/transaction-derived numeric features, 4 categorical transaction fields, and 11 selected C/D numeric fields. The feature contract is explicit and shared across model implementations. `TransactionDT` is retained for splitting and temporal analysis, not used as a model feature. The fraud label is never a feature.
+The contract contains 28 named features, shared across all model implementations.
 
-Be ready to explain why each feature family exists and how missing values are interpreted. Do not claim that every feature is causally predictive.
+**13 behavioral / transaction-derived numeric features**
+
+`TransactionAmt`, `amount_log1p`, `transaction_hour_bucket`,
+`transaction_day_mod7`, `card_txn_count_1h`, `card_txn_count_24h`,
+`card_has_history_1h`, `card_has_history_24h`, `card_amount_sum_24h`,
+`address_txn_count_1h`, `address_txn_count_24h`,
+`address_has_history_1h`, `address_amount_sum_24h`.
+
+**4 categorical transaction features**
+
+`ProductCD`, `card6`, `P_emaildomain`, `R_emaildomain`.
+
+**11 selected C/D numeric features**
+
+`C1`, `C2`, `C11`, `C13`, `D2`, `D3`, `D4`, `D8`, `D10`,
+`D11`, `D15`.
+
+The 13 behavioral fields summarize transaction amount/time and strictly prior
+card/address activity over one-hour and 24-hour windows. The categorical fields
+represent transaction/product and email/card categories. The selected C/D
+fields are benchmark-provided numeric signals. The exact definitions and
+construction rules live in `ml/features/` and `ml/data/modeling.py`.
+
+Raw entity identifiers (`card1`, `addr1`, `addr2`) are grouping keys for
+behavioral aggregates, not direct model predictors. `TransactionDT` is kept
+for chronological splitting and temporal analysis, not as a model feature.
+The fraud label `isFraud` is never a feature. D5 is deliberately excluded:
+validation-only backward elimination improved validation AP from 0.471864 to
+0.474352 after removing it; TEST was not used for that feature decision.
+
+Missingness is family-specific. Behavioral features are expected to be
+computed for every row, so a missing value is treated as a feature-pipeline
+failure. Missing C/D and categorical values are valid source-data absences and
+are preserved for preprocessing to impute or encode.
+
+Be ready to explain why each feature family exists and how missing values are
+interpreted. Do not claim that every feature is causally predictive.
 
 ## Split, preprocessing and model comparison
 
