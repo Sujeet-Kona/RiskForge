@@ -36,4 +36,22 @@ httpx==0.28.1
 SQLAlchemy==2.1.6
 alembic==1.20.1
 psycopg[binary]==3.3.6
+# MLflow experiment and model-lifecycle tracking (Phase 8), offline only.
+# `mlflow-skinny` rather than `mlflow`, chosen on the resolver's own output:
+# `pip install --dry-run mlflow==3.17.2` reported it would install
+# pyarrow-25.0.1, downgrading the pinned pyarrow==26.0.0 that the parquet
+# behavioral pipeline reads with, and would also pull in Flask, gunicorn,
+# graphene, matplotlib, aiohttp and docker-7.2.0 — a model-serving stack this
+# phase explicitly does not add. `pip install --dry-run mlflow-skinny==3.17.2`
+# reported no change to any pinned package above; after installing it, pandas,
+# numpy, scikit-learn, scipy, pyarrow, xgboost, shap, joblib, fastapi, pydantic,
+# starlette, uvicorn, httpx, SQLAlchemy, alembic and psycopg were all re-read
+# from the environment at the versions listed here.
+# Only tracking/run.py imports it, which tests/test_serving_discipline.py
+# enforces, so the inference path carries no MLflow dependency at all.
+# Note: MLflow 3.x serializes the sklearn flavor with `skops` by default and
+# skops is not installed here, so tracking/run.py passes
+# serialization_format="cloudpickle" explicitly — the same representation the
+# Phase 6 joblib serving bundle already uses.
+mlflow-skinny==3.17.2
 pytest==9.2.0

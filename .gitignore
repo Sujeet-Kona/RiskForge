@@ -17,4 +17,12 @@ artifacts/
 # Local database files, if a volume is ever bind-mounted instead of named.
 pgdata/
 
+# Generated MLflow tracking state (Phase 8): run metadata, logged model artifacts
+# and the local model registry. These are the two local backends
+# tracking/config.py accepts — a `file:` directory and a SQLite database — and
+# the location is set by MLFLOW_TRACKING_URI. The repository carries the
+# configuration and the scripts, never the experiment database.
+mlruns/
+mlflow.db
+
 .DS_Store
