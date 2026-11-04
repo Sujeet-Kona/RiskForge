@@ -173,7 +173,7 @@ def test_cross_validation_does_not_leak_the_held_out_fold_labels():
     groups = make_groups(400)
 
     folds = temporal_fold_assignments(groups, DEFAULT_CALIBRATION_FOLDS)
-    target_fold = 0
+    target_fold = 1
     held_out = folds == target_fold
 
     honest = cross_validate_calibration(
@@ -201,8 +201,37 @@ def test_cross_validation_does_not_leak_the_held_out_fold_labels():
     )
 
 
+def test_forward_calibration_never_uses_future_fold_labels():
+    scores, labels = make_scores(400)
+    groups = make_groups(400)
+    folds = temporal_fold_assignments(groups, DEFAULT_CALIBRATION_FOLDS)
+    target_fold = 1
+    target_rows = folds == target_fold
+
+    honest = cross_validate_calibration(
+        "isotonic", scores, labels, groups, DEFAULT_CALIBRATION_FOLDS
+    )
+
+    future_labels_changed = labels.copy()
+    future_labels_changed.iloc[folds > target_fold] = (
+        1 - future_labels_changed.iloc[folds > target_fold]
+    )
+    future_changed = cross_validate_calibration(
+        "isotonic",
+        scores,
+        future_labels_changed,
+        groups,
+        DEFAULT_CALIBRATION_FOLDS,
+    )
+
+    np.testing.assert_allclose(
+        honest.to_numpy()[target_rows],
+        future_changed.to_numpy()[target_rows],
+    )
+
+
 @pytest.mark.parametrize("method", CALIBRATION_METHODS)
-def test_cross_validation_covers_every_row(method):
+def test_cross_validation_leaves_only_the_initial_warmup_fold_unscored(method):
     scores, labels = make_scores(300)
     groups = make_groups(300)
 
@@ -214,10 +243,15 @@ def test_cross_validation_covers_every_row(method):
         DEFAULT_CALIBRATION_FOLDS,
     )
 
+    folds = temporal_fold_assignments(groups, DEFAULT_CALIBRATION_FOLDS)
+    warmup = folds == 0
+    scored = ~warmup
+
     assert len(out_of_fold) == len(scores)
     assert list(out_of_fold.index) == list(scores.index)
-    assert out_of_fold.notna().all()
-    assert ((out_of_fold >= 0.0) & (out_of_fold <= 1.0)).all()
+    assert out_of_fold.iloc[warmup].isna().all()
+    assert out_of_fold.iloc[scored].notna().all()
+    assert ((out_of_fold.iloc[scored] >= 0.0) & (out_of_fold.iloc[scored] <= 1.0)).all()
 
 
 def test_temporal_folds_keep_timestamp_groups_intact_and_ordered():
