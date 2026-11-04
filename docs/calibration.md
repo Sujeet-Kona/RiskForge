@@ -55,12 +55,32 @@ review should the locked policy version, constants, tests and serving artifact
 be changed together. Until then, keep `policy-001` as the active serving policy
 and do not describe its thresholds as revalidated under the corrected protocol.
 
-The locked serving-artifact builder currently specifies isotonic calibration.
-After changing the validation protocol, rerun
-`PYTHONPATH=. python scripts/evaluate_calibration.py` on the local IEEE-CIS
-dataset and inspect the new method-selection result before treating isotonic as
-the empirically preferred method. Do not infer that the previous calibration
-metrics or threshold results remain unchanged.
+The corrected protocol was rerun on the local IEEE-CIS dataset. Across
+70,334 forward-chaining OOF VALIDATION rows (17,679 warm-up rows excluded):
+
+| Method | Brier (selection metric) | Log loss | ECE | PR-AUC | ROC-AUC |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Sigmoid | 0.025368 | 0.104336 | 0.010320 | 0.426233 | 0.876543 |
+| Isotonic | 0.024703 | 0.108550 | 0.004678 | 0.422378 | 0.874798 |
+
+Isotonic was selected because Brier score is the predeclared method-selection
+criterion and isotonic achieved the lower OOF Brier score. This is not a claim
+that isotonic wins every metric: sigmoid had lower OOF log loss and higher
+ranking metrics. The selection criterion must be stated when presenting this
+result.
+
+The selected isotonic calibrator was refitted on all VALIDATION rows for the
+serving artifact. On the 88,081-row held-out TEST partition (3,065 fraud cases),
+the calibrated results were PR-AUC 0.438919, ROC-AUC 0.864850, Brier 0.024204,
+log loss 0.102851 and ECE 0.003553. Raw XGBoost TEST PR-AUC and ROC-AUC were
+0.449254 and 0.865318 respectively. These are benchmark results, not estimates
+of future payment-network performance.
+
+The serving-artifact builder therefore continues to use isotonic calibration,
+consistent with the recorded OOF Brier selection. The active serving policy
+remains `policy-001`; the experimental candidate threshold search is separate
+and has not been promoted. Full results and the threshold-selection caveat are
+recorded in [model evaluation](model-evaluation.md).
 
 ## Reproduction
 
