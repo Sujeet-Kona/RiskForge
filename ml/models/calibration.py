@@ -238,35 +238,61 @@ def cross_validate_calibration(
 ) -> pd.Series:
     """Return out-of-fold calibrated scores for honest method selection.
 
-    Each fold's calibrator sees only the labels of the *other* folds, so a
-    method cannot be chosen for how well it memorises the rows it was fitted
-    on. Isotonic regression in particular fits its own training labels almost
-    exactly, which makes in-sample comparison meaningless.
+    The first chronological fold is an unscored warm-up period. Each later
+    fold is scored by a calibrator fitted only on strictly earlier folds.
+    Predictions for earlier periods can therefore never depend on later labels.
+    The returned series contains NaN for the warm-up rows; evaluate only rows
+    with a finite out-of-fold prediction.
     """
+    _validate_scores(raw_probability, y_true)
+
+    if len(groups) != len(raw_probability):
+        raise ValueError("groups and raw_probability must have the same length.")
+
+    if not y_true.index.equals(raw_probability.index):
+        raise ValueError("y_true and raw_probability must have matching indexes.")
+
+    if not groups.index.equals(raw_probability.index):
+        raise ValueError("groups and raw_probability must have matching indexes.")
+
     folds = temporal_fold_assignments(groups, n_folds)
 
+    # The first chronological fold is a warm-up period. It cannot be scored
+    # honestly because no earlier calibration labels exist. Every later fold
+    # is calibrated using only strictly earlier folds (expanding-window CV).
     out_of_fold = np.full(len(raw_probability), np.nan)
 
-    for fold in range(n_folds):
-        held_out = folds == fold
+    for fold in range(1, n_folds):
+        fit_rows = folds < fold
+        score_rows = folds == fold
 
-        if not held_out.any():
+        if not score_rows.any():
             raise ValueError(f"Cross-validation fold {fold} is empty.")
 
-        if y_true[~held_out].nunique() < 2:
+        fit_labels = y_true.iloc[fit_rows]
+        fit_scores = raw_probability.iloc[fit_rows]
+
+        if fit_labels.nunique() < 2:
             raise ValueError(
-                f"Cross-validation fold {fold} leaves a single-class fit set."
+                f"Cross-validation fold {fold} has a single-class "
+                "strictly-prior calibration fit set."
+            )
+
+        if fit_scores.nunique() < 2:
+            raise ValueError(
+                f"Cross-validation fold {fold} has fewer than two distinct "
+                "strictly-prior calibration scores."
             )
 
         calibrator = fit_calibrator(
             method,
-            raw_probability[~held_out],
-            y_true[~held_out],
+            fit_scores,
+            fit_labels,
         )
 
-        out_of_fold[held_out] = apply_calibrator(
+        out_of_fold[score_rows] = apply_calibrator(
             calibrator,
-            raw_probability[held_out],
+            raw_probability.iloc[score_rows],
         ).to_numpy()
 
     return pd.Series(

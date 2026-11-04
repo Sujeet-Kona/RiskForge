@@ -9,7 +9,7 @@ from policy.costs import CostAssumptions
 from policy.decision import Decision, DecisionPolicy, PolicyConfig
 
 
-DEFAULT_POLICY_VERSION = "policy-001"
+CANDIDATE_POLICY_VERSION = "candidate"
 
 # The fixed grid is dense below 0.10 because that is where the calibrated
 # probability mass actually sits; a uniform grid over [0, 1] would waste almost
@@ -325,7 +325,7 @@ def search_thresholds(
     *,
     candidates: np.ndarray | None = None,
     max_review_rate: float | None = None,
-    policy_version: str = DEFAULT_POLICY_VERSION,
+    policy_version: str = CANDIDATE_POLICY_VERSION,
     runner_up_count: int = 5,
 ) -> ThresholdSearchResult:
     """Find the minimum-expected-cost ``(T_REVIEW, T_BLOCK)`` pair.

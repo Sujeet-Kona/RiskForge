@@ -1,8 +1,11 @@
 # RiskForge audit persistence
 
-One PostgreSQL table, written once per successful decision, so that a decision can
-be reconstructed later. This is an **audit store**: it is not part of model
-training, it is not a feature store, and it is not distributed infrastructure.
+One PostgreSQL table receives one row per successful decision so the reported
+decision details can be inspected later. It is an **application-level
+append-only audit store**: the application writes and reads records but does not
+update or delete them. It does not retain the prior-history rows needed to
+recompute a score. This is not a database-enforced immutability guarantee, a
+feature store, or distributed infrastructure.
 
 ---
 
@@ -150,7 +153,7 @@ PostgreSQL 17 database, and the reflected schema was compared with
 
 ## 6. Audit schema
 
-One table, `risk_decisions`, append-only.
+One table, `risk_decisions`, used as append-only by the application.
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -206,6 +209,20 @@ constraints reject the same things if that layer is bypassed. Both paths are
 tested (`tests/test_db_models.py`, `tests/test_db_repository.py`).
 
 ---
+
+### Append-only and idempotency boundaries
+
+Append-only describes the repository's application behaviour, not a
+tamper-proof database guarantee. The schema does not install triggers that
+reject UPDATE or DELETE, and the application database role is not restricted
+here to insert/select privileges. A database administrator or another client
+with sufficient privileges can modify or remove rows.
+
+The `transaction_id` column is indexed but not unique. Repeating a scoring
+request can therefore create multiple audit rows; the API does not currently
+provide an idempotency key or deduplication contract. These limits are
+intentional scope boundaries and must not be described as immutable or
+exactly-once audit storage.
 
 ## 7. API persistence behaviour
 

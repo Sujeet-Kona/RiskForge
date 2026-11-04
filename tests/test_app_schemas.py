@@ -188,6 +188,23 @@ def test_a_blank_transaction_id_is_rejected(score_payload, transaction_id):
         RiskScoreRequest(**payload)
 
 
+def test_a_transaction_id_at_the_database_limit_is_accepted(score_payload):
+    payload = copy.deepcopy(score_payload)
+    payload["transaction"]["TransactionID"] = "x" * 64
+
+    request = RiskScoreRequest(**payload)
+
+    assert len(request.transaction.TransactionID) == 64
+
+
+def test_a_transaction_id_longer_than_the_database_limit_is_rejected(score_payload):
+    payload = copy.deepcopy(score_payload)
+    payload["transaction"]["TransactionID"] = "x" * 65
+
+    with pytest.raises(ValidationError, match="at most 64 characters"):
+        RiskScoreRequest(**payload)
+
+
 def test_a_non_integer_card1_is_rejected(score_payload):
     payload = copy.deepcopy(score_payload)
     payload["transaction"]["card1"] = "thirteen"

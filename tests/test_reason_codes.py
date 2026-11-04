@@ -201,3 +201,16 @@ def test_reason_codes_are_frozen():
 
     with pytest.raises(Exception):
         reason.code = "SOMETHING_ELSE"
+
+
+def test_elapsed_time_reason_codes_do_not_claim_calendar_semantics():
+    hour = reason_code_for_feature("transaction_hour_bucket")
+    weekday = reason_code_for_feature("transaction_day_mod7")
+
+    assert "elapsed" in hour.title.lower()
+    assert "wall-clock" in hour.description.lower()
+    assert "time-of-day" not in hour.title.lower()
+
+    assert "elapsed" in weekday.title.lower()
+    assert "calendar weekday" in weekday.description.lower()
+    assert "day-of-week" not in weekday.title.lower()

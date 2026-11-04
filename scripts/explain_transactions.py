@@ -21,8 +21,13 @@ from ml.data.modeling import (
 from ml.models.calibration import apply_calibrator, fit_calibrator
 from ml.models.xgboost_model import fit_xgboost_model, predict_fraud_probability
 from ml.split.temporal import temporal_split
-from policy.costs import EXPERIMENTAL_COST_ASSUMPTIONS
-from policy.decision import Decision, DecisionPolicy, PolicyConfig
+from policy.decision import Decision
+
+from policy.locked import (
+    LOCKED_BLOCK_THRESHOLD,
+    LOCKED_REVIEW_THRESHOLD,
+    build_locked_policy,
+)
 
 
 BEHAVIORAL_PATH = Path("data/processed/train_behavioral_v1.parquet")
@@ -38,9 +43,6 @@ TRANSACTION_COLUMNS = [
 # The frozen Phase 3 deployment mapping and the frozen Phase 4 policy. Neither
 # is re-derived here; both are read from the locked artifacts.
 LOCKED_CALIBRATION_METHOD = "isotonic"
-LOCKED_POLICY_VERSION = "policy-001"
-LOCKED_REVIEW_THRESHOLD = 0.075
-LOCKED_BLOCK_THRESHOLD = 0.110
 
 SELECTION_NOTE = (
     "The three transactions below are chosen from VALIDATION using only their "
@@ -60,16 +62,6 @@ def print_header(step: str, title: str) -> None:
     print(f"\n[{step}] {title}...")
 
 
-def build_frozen_policy() -> DecisionPolicy:
-    """The locked policy-001, with its Phase 4 thresholds verbatim."""
-    return DecisionPolicy(
-        PolicyConfig(
-            policy_version=LOCKED_POLICY_VERSION,
-            review_threshold=LOCKED_REVIEW_THRESHOLD,
-            block_threshold=LOCKED_BLOCK_THRESHOLD,
-            costs=EXPERIMENTAL_COST_ASSUMPTIONS,
-        )
-    )
 
 
 def select_examples(
@@ -230,7 +222,7 @@ def main() -> None:
 
     print_header("5/6", "Selecting one ALLOW, one REVIEW and one BLOCK row")
 
-    policy = build_frozen_policy()
+    policy = build_locked_policy()
     decisions = policy.decide_many(calibrated)
 
     for decision in (Decision.ALLOW, Decision.REVIEW, Decision.BLOCK):

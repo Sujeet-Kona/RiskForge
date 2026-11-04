@@ -139,22 +139,24 @@ MODEL_SIGNAL_REASON_CODES: tuple[ReasonCode, ...] = (
     ),
     ReasonCode(
         code="TRANSACTION_HOUR_SIGNAL",
-        title="Time-of-day signal",
+        title="Elapsed-time hour-bucket signal",
         type=MODEL_SIGNAL,
         features=("transaction_hour_bucket",),
         description=(
-            "The hour bucket derived from TransactionDT contributed to the "
-            "model's fraud-risk score."
+            "The 24-hour bucket derived from elapsed TransactionDT seconds "
+            "contributed to the model's fraud-risk score; it is not a "
+            "wall-clock time-of-day measurement."
         ),
     ),
     ReasonCode(
         code="TRANSACTION_WEEKDAY_SIGNAL",
-        title="Day-of-week signal",
+        title="Elapsed-day modulo-seven signal",
         type=MODEL_SIGNAL,
         features=("transaction_day_mod7",),
         description=(
-            "The day index modulo 7 derived from TransactionDT contributed to "
-            "the model's fraud-risk score."
+            "The elapsed-day index modulo 7 derived from TransactionDT "
+            "contributed to the model's fraud-risk score; it is not a "
+            "calendar weekday."
         ),
     ),
     ReasonCode(

@@ -40,7 +40,7 @@ class TransactionPayload(BaseModel):
 
     model_config = STRICT
 
-    TransactionID: str = Field(min_length=1)
+    TransactionID: str = Field(min_length=1, max_length=64)
     TransactionDT: int = Field(
         ge=0,
         description="Elapsed seconds, matching the offline TransactionDT scale.",
