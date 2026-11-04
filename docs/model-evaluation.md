@@ -19,26 +19,112 @@ The split is chronological, and equal transaction timestamps are kept together.
 Preprocessing and XGBoost are fitted on TRAIN. Calibration method selection and
 policy search use VALIDATION. TEST is reserved for final reporting.
 
-## Three-model benchmark and robustness protocol\n\nThe final comparison is implemented in `scripts/run_model_benchmark.py`. Run it from the repository root after the behavioral parquet and IEEE-CIS transaction CSV are present:\n\n```bash\nPYTHONPATH=. python scripts/run_model_benchmark.py\n```\n\nFor a longer bootstrap run, increase the default 500 replicates:\n\n```bash\nPYTHONPATH=. python scripts/run_model_benchmark.py --bootstrap-replicates 1000\n```\n\nThe script fits Logistic Regression, Random Forest and XGBoost on the same TRAIN rows and 28-feature contract. Each model's preprocessing is fitted inside its TRAIN-only pipeline. Fixed model settings are recorded in `run_metadata.json`; Random Forest is a documented baseline configuration, not a tuned optimum. Validation metrics support comparison. TEST metrics are reported for all fixed candidates as a final held-out comparison; do not use them to choose a model or tune parameters.\n\nOutputs are written under `reports/model_benchmark/`:\n\n- `model_metrics.csv`: VALIDATION and TEST metrics (average precision, ROC-AUC, Brier score and log loss).\n- `test_segment_metrics.csv`: TEST performance by four chronological periods, TRAIN-defined transaction-amount bands, ProductCD and prior 24-hour card activity.\n- `test_bootstrap_intervals.csv`: paired, class-stratified percentile-bootstrap 95% intervals for TEST average precision and ROC-AUC, plus paired XGBoost-minus-baseline differences.\n- `run_metadata.json`: feature contract, split sizes, model settings, fit times, bootstrap seed and interpretation notes.\n\nAverage precision is the primary ranking metric. Brier score and log loss are descriptive because class weighting can distort raw probability calibration. The bootstrap resamples positive and negative TEST cases separately and uses identical sampled rows across models. Its intervals quantify sampling uncertainty under this holdout, not future dataset shift or retraining variability. Segment metrics include sample and fraud counts; AP/ROC-AUC are marked unavailable where a segment lacks both classes. Amount cut points come from TRAIN, and temporal groups preserve equal timestamps.\n\n**Execution status:** the benchmark implementation and unit tests are committed, but its dataset-dependent run has not yet been observed. Do not publish a model winner, segment conclusion or confidence interval until the command completes successfully and its generated outputs have been reviewed.\n\n## Model implementations
+## Three-model benchmark and robustness results
 
-The repository contains:
+The final comparison is implemented in `scripts/run_model_benchmark.py`.
+It was executed locally against the IEEE-CIS dataset using the same
+chronological split and 28-feature contract for all three models.
 
-- Logistic Regression baseline: `ml/models/logistic_baseline.py`,
-  executed by `scripts/train_logistic_baseline.py`.
-- XGBoost model: `ml/models/xgboost_model.py`, executed for diagnostic
-  training by `scripts/train_xgboost.py` and rebuilt for serving by
-  `scripts/build_serving_artifact.py`.
+Reproduce it with:
 
-The Logistic Regression baseline uses the same 28-feature contract and
-chronological split, with median imputation, numeric standardization,
-categorical preprocessing and class-balanced fitting.
+```bash
+PYTHONPATH=. python scripts/run_model_benchmark.py
+```
 
-A numeric Logistic Regression-versus-XGBoost comparison is intentionally not
-published here because a verified baseline run output has not been committed.
-Do not claim that XGBoost outperformed the baseline without recording the
-validation metrics from both runs under the same data and evaluation protocol.
-Use VALIDATION for model selection; do not use TEST results to choose a model
-or tune hyperparameters.
+The default bootstrap uses 500 replicates; increase this with
+`--bootstrap-replicates` for a longer run.
+
+### Held-out model comparison
+
+Average Precision (AP) is the primary ranking metric because fraud is rare.
+ROC-AUC is complementary. Brier score and log loss are descriptive diagnostics
+because class weighting can distort raw probability calibration.
+
+| Model | TEST AP | TEST ROC-AUC |
+| --- | ---: | ---: |
+| Logistic Regression | 0.145789 | 0.780255 |
+| Random Forest | 0.426033 | 0.861220 |
+| XGBoost | 0.449254 | 0.865318 |
+
+XGBoost achieved the highest overall TEST AP and ROC-AUC on this fixed
+chronological holdout. This is evidence for this dataset and split, not proof
+that it will generalize best to future payment traffic.
+
+### Paired bootstrap uncertainty
+
+The script uses 500 paired, class-stratified percentile-bootstrap replicates
+with seed `20261104`. The same sampled TEST rows are used for each model.
+
+| Model | TEST AP 95% CI | TEST ROC-AUC 95% CI |
+| --- | --- | --- |
+| Logistic Regression | [0.136244, 0.155149] | [0.770834, 0.789119] |
+| Random Forest | [0.408384, 0.443758] | [0.854032, 0.868409] |
+| XGBoost | [0.430757, 0.467033] | [0.858336, 0.872366] |
+
+| Paired difference | AP difference 95% CI | ROC-AUC difference 95% CI |
+| --- | --- | --- |
+| XGBoost minus Logistic Regression | [+0.287405, +0.318510] | [+0.078614, +0.091628] |
+| XGBoost minus Random Forest | [+0.015090, +0.030551] | [+0.001328, +0.007241] |
+
+These intervals quantify sampling uncertainty under this empirical holdout.
+They do not account for temporal dependence, dataset shift, model retraining
+variability, or threshold-selection uncertainty.
+
+### Segment robustness findings
+
+XGBoost had the highest AP in all four chronological TEST periods:
+
+| Period | XGBoost AP | Random Forest AP |
+| --- | ---: | ---: |
+| 1 | 0.462382 | 0.437336 |
+| 2 | 0.398156 | 0.397353 |
+| 3 | 0.460684 | 0.441258 |
+| 4 | 0.471802 | 0.434679 |
+
+The advantage in period 2 was very small. XGBoost also had higher AP in all
+four TRAIN-defined amount bands and all three prior-24-hour card-history
+groups.
+
+ProductCD results were not uniformly in its favor: Random Forest narrowly
+led AP for category H (0.377120 versus XGBoost 0.376596). XGBoost led AP for
+category S (0.473999 versus Random Forest 0.443186), while Random Forest led
+ROC-AUC for S (0.787611 versus XGBoost 0.762257). H and S have small fraud
+counts, so these differences should not be overinterpreted.
+
+ProductCD W is difficult for both models: XGBoost AP was 0.085566 and Random
+Forest AP was 0.073854. These are descriptive slices of one TEST window,
+not independent future deployments. Segment-level confidence intervals are
+not reported.
+
+### Generated outputs
+
+The benchmark writes files under `reports/model_benchmark/`:
+
+- `model_metrics.csv`: VALIDATION and TEST metrics for all three models.
+- `test_segment_metrics.csv`: TEST results by chronological period,
+  TRAIN-defined amount band, ProductCD and prior 24-hour card activity.
+- `test_bootstrap_intervals.csv`: paired bootstrap intervals and model
+  differences for TEST AP and ROC-AUC.
+- `run_metadata.json`: split, feature contract, model settings, timings,
+  bootstrap seed and execution metadata.
+
+Temporal groups preserve equal timestamps. Amount cut points are calculated
+from TRAIN, not TEST. Segment metrics include sample and fraud counts;
+metrics requiring both classes are unavailable when a segment lacks one.
+
+### Model implementations
+
+- Logistic Regression: `ml/models/logistic_baseline.py`, executed by
+  `scripts/train_logistic_baseline.py`.
+- Random Forest: fixed baseline configuration in
+  `scripts/run_model_benchmark.py`; it is not a tuned optimum.
+- XGBoost: `ml/models/xgboost_model.py`, used by diagnostic training and
+  serving-artifact workflows.
+
+All three benchmark pipelines use the same 28-feature contract and
+chronological partitions. Preprocessing is fitted on TRAIN only. TEST is
+reserved for final reporting and must not be used to select models or tune
+parameters.
 
 ## Calibration method selection
 
