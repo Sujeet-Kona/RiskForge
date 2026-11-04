@@ -6,7 +6,7 @@ empty database produces exactly the table :mod:`db.models` describes, and that
 downgrading takes it away again. A model-only test could not tell the difference
 between a migration that was written and a migration that works.
 
-Skipped, visibly, when no PostgreSQL is reachable.
+Skipped, visibly, when no PostgreSQL is reachable locally. CI fails instead.
 """
 
 from __future__ import annotations

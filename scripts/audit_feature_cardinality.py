@@ -88,7 +88,7 @@ def profile_categorical_columns(
         print(f"\n{column}")
         print(f"  unique: {non_null.nunique():,}")
         print(f"  missing: {series.isna().mean() * 100:.2f}%")
-        print(f"  top 5 values:")
+        print("  top 5 values:")
 
         for value, count in value_counts.head(5).items():
             percentage = count / len(non_null) * 100

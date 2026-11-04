@@ -29,6 +29,12 @@ TINY_SEED = 21
 # ``riskforge`` database, and anything in it, is never a test fixture.
 AUDIT_TEST_DATABASE = "riskforge_test"
 
+# Local pytest may skip the PostgreSQL suite when no server is reachable.
+# CI must not: GitHub Actions sets CI=true, and the workflow also sets
+# RISKFORGE_REQUIRE_POSTGRES=1 so a skipped database suite cannot go green.
+_POSTGRES_REQUIRED_FLAGS = ("RISKFORGE_REQUIRE_POSTGRES", "CI")
+_TRUTHY_ENVIRONMENT_VALUES = {"1", "true", "yes"}
+
 
 def make_tiny_frame(n: int = TINY_ROWS, seed: int = TINY_SEED) -> pd.DataFrame:
     """A small modeling frame that exercises the real 28-feature contract.
@@ -489,6 +495,14 @@ def _audit_test_url() -> str:
     return url.rsplit("/", 1)[0] + "/" + AUDIT_TEST_DATABASE
 
 
+def _environment_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in _TRUTHY_ENVIRONMENT_VALUES
+
+
+def _postgres_is_required() -> bool:
+    return any(_environment_flag(name) for name in _POSTGRES_REQUIRED_FLAGS)
+
+
 def _create_test_database(url: str) -> None:
     """Create the test database, if it is missing and the role may create one."""
     from sqlalchemy import create_engine, text
@@ -550,8 +564,9 @@ def audit_database():
     sees was produced by Alembic in this session rather than left over from an
     earlier run.
 
-    Skipped when no PostgreSQL is reachable. The skip is reported in the run
-    summary, so the database tests can never pass silently without a database.
+    Skipped when no PostgreSQL is reachable and the suite is running locally.
+    The skip is reported in the run summary. In CI the same failure is a hard
+    error, so database tests cannot pass by being skipped.
     """
     from alembic import command
     from sqlalchemy.exc import SQLAlchemyError
@@ -569,7 +584,10 @@ def audit_database():
             pass
     except SQLAlchemyError as error:
         database.dispose()
-        pytest.skip(f"no PostgreSQL available to the audit tests: {error}")
+        message = f"no PostgreSQL available to the audit tests: {error}"
+        if _postgres_is_required():
+            pytest.fail(message)
+        pytest.skip(message)
 
     with _database_url_set(url):
         command.downgrade(_alembic_config(), "base")

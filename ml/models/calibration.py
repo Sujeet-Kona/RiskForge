@@ -130,7 +130,8 @@ def fit_calibrator(
     Fitting on the model's own training scores teaches the calibrator an
     over-confident mapping, because those scores are in-sample.
     """
-    calibrator = build_calibrator(method)
+    # Rejects an unknown method up front; the fitted bundle is built below.
+    build_calibrator(method)
 
     _validate_scores(raw_probability, y_true)
 

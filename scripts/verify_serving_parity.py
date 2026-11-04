@@ -33,7 +33,6 @@ from app.schemas import HistoryTransaction, RiskScoreRequest, TransactionPayload
 from explain.explanation import explain_transaction
 from explain.model_explanation import DEFAULT_TOP_K, build_model_explainer
 from ml.data.modeling import (
-    BEHAVIORAL_FEATURES,
     CATEGORICAL_FEATURES,
     CD_FEATURES,
     MODEL_FEATURES,

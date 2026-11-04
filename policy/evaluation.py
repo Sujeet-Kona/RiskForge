@@ -373,7 +373,6 @@ def search_thresholds(
         ([0], np.cumsum(1 - sorted_labels))
     )
 
-    total_fraud = int(cumulative_fraud[n])
     total_legitimate = int(cumulative_legitimate[n])
 
     cuts = np.searchsorted(sorted_values, candidates, side="left")

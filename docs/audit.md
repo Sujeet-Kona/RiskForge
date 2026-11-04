@@ -52,7 +52,8 @@ Stated plainly, because each of these would be a plausible-looking mistake:
   Celery, no background worker, no retry. One synchronous write per successful
   inference is the whole persistence budget.
 - **It is not production infrastructure.** No replication, no pooling proxy, no
-  connection limit tuning, no TLS, no migrations automation in CI.
+  connection limit tuning, no TLS. Applying the committed migration in CI is a
+  schema check, not a production rollout; see `docs/ci.md`.
 
 The consequence of the second bullet is real and worth stating: an audit row tells
 you what was scored and what was decided, but it is **not sufficient to recompute
@@ -289,9 +290,11 @@ apply a threshold and does not know what a model is. No module in `app/` imports
 Database tests create `riskforge_test` themselves and run Alembic
 `downgrade base → upgrade head` in the session fixture, so the schema they assert
 against was produced in that run rather than left over. When no PostgreSQL is
-reachable they **skip, and the skip is reported** — they cannot pass silently
-without a database. Every other test uses an in-memory audit double, so the wire
-contract does not depend on a server being up.
+reachable locally they **skip, and the skip is reported**. CI sets
+`RISKFORGE_REQUIRE_POSTGRES` so the same fixture fails instead of skipping —
+the suite cannot go green without a database. Every other test uses an
+in-memory audit double, so the wire contract does not depend on a server being
+up.
 
 ---
 

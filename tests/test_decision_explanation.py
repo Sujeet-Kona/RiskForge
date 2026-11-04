@@ -6,7 +6,6 @@ from explain.decision_explanation import (
     ALLOW_TEMPLATE,
     BLOCK_TEMPLATE,
     REVIEW_TEMPLATE,
-    DecisionExplanation,
     explain_decision,
 )
 from explain.reason_codes import DECISION_REASON_CODES

@@ -10,7 +10,6 @@ from explain.reason_codes import (
     MODEL_SIGNAL,
     MODEL_SIGNAL_REASON_CODES,
     UNDOCUMENTED_SEMANTICS_NOTE,
-    ReasonCode,
     all_reason_codes,
     decision_reason_code,
     reason_code_for_feature,

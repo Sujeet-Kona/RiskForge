@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from policy.costs import EXPERIMENTAL_COST_ASSUMPTIONS, CostAssumptions
+from policy.costs import CostAssumptions
 from policy.decision import Decision, DecisionPolicy, PolicyConfig
 from policy.evaluation import (
     DEFAULT_POLICY_VERSION,

@@ -1,0 +1,86 @@
+# RiskForge CI: syntax, lint, Alembic, PostgreSQL integration, and the full
+# pytest suite. This is not a training pipeline and does not need IEEE-CIS
+# data, a serving artifact, or a hosted MLflow server.
+
+name: RiskForge CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, migrate, and test
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql+psycopg://riskforge:riskforge@localhost:5432/riskforge
+      RISKFORGE_REQUIRE_POSTGRES: "1"
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: riskforge
+          POSTGRES_USER: riskforge
+          POSTGRES_PASSWORD: riskforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U riskforge -d riskforge"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install ruff==0.17.3
+
+      - name: Lint with Ruff
+        run: python -m ruff check .
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
+
+      - name: Apply Alembic migrations
+        run: alembic upgrade head
+
+      - name: Check Alembic schema consistency
+        run: alembic check
+
+      - name: Verify Alembic is at the committed head
+        run: |
+          current="$(alembic current)"
+          printf '%s\n' "$current"
+          python -c '
+          import sys
+
+          expected = "7eccd8f63a8c"
+          current = sys.argv[1]
+          if expected not in current.split():
+              sys.exit(
+                  "Alembic current revision is not the committed head "
+                  f"{expected}: {current!r}"
+              )
+          ' "$current"
+
+      - name: Run the test suite
+        run: python -m pytest -q

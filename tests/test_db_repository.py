@@ -1,9 +1,10 @@
 """The repository against a real PostgreSQL database.
 
 Every test here needs a server; the ``audit_database`` fixture skips the module
-when none is reachable, and the skip is visible in the run summary. Nothing in
-this file talks to a mock, because the thing under test is the round trip: what
-the service hands over, what PostgreSQL stores, and what comes back.
+when none is reachable locally, and the skip is visible in the run summary. CI
+fails instead of skipping. Nothing in this file talks to a mock, because the
+thing under test is the round trip: what the service hands over, what
+PostgreSQL stores, and what comes back.
 """
 
 from __future__ import annotations
