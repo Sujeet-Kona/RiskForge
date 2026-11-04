@@ -154,8 +154,9 @@ MODEL_SIGNAL_REASON_CODES: tuple[ReasonCode, ...] = (
         type=MODEL_SIGNAL,
         features=("transaction_day_mod7",),
         description=(
-            "The day index modulo 7 derived from TransactionDT contributed to "
-            "the model's fraud-risk score."
+            "The elapsed-day index modulo 7 derived from TransactionDT "
+            "contributed to the model's fraud-risk score; it is not a "
+            "calendar weekday."
         ),
     ),
     ReasonCode(
