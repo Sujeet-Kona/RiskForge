@@ -192,6 +192,15 @@ def test_a_malformed_body_is_rejected(client):
     assert response.status_code == 422
 
 
+def test_transaction_id_longer_than_audit_column_limit_is_rejected(
+    client, score_payload
+):
+    payload = copy.deepcopy(score_payload)
+    payload["transaction"]["TransactionID"] = "x" * 65
+
+    assert _post(client, payload).status_code == 422
+
+
 def test_an_empty_body_is_rejected(client):
     assert client.post(SCORE_ROUTE, json={}).status_code == 422
 
