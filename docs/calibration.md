@@ -40,6 +40,13 @@ calibration procedures; consequently, the validation threshold-search cost is
 not an unbiased estimate of deployed policy cost. The frozen TEST evaluation is
 the final held-out check for the resulting model/calibrator/policy combination.
 
+The thresholds currently stored in `policy/locked.py` predate this corrected
+forward-chaining validation protocol. They must be compared with the new output
+from `scripts/select_decision_policy.py` on the local IEEE-CIS data. If the
+selected thresholds change, update the locked policy constants, policy version,
+related tests and serving artifact together; do not silently keep the old lock
+and describe it as newly validated.
+
 The locked serving-artifact builder currently specifies isotonic calibration.
 After changing the validation protocol, rerun
 `PYTHONPATH=. python scripts/evaluate_calibration.py` on the local IEEE-CIS
