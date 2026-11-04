@@ -69,9 +69,9 @@ applied once to TEST.
 | --- | ---: | ---: |
 | PR-AUC | 0.449254 | 0.438919 |
 | ROC-AUC | 0.865318 | 0.864850 |
-| Brier | Not applicable to raw ranking summary | 0.024204 |
-| Log loss | Not applicable to raw ranking summary | 0.102851 |
-| ECE | Not applicable to raw ranking summary | 0.003553 |
+| Brier | Not reported | 0.024204 |
+| Log loss | Not reported | 0.102851 |
+| ECE | Not reported | 0.003553 |
 
 Calibration changes probability quality, not just ranking. The calibrated
 model's slightly lower ranking metrics are not hidden; calibration was selected
