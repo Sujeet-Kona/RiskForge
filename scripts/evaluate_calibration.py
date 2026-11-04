@@ -287,10 +287,13 @@ def main() -> None:
     print(f"\n{SELECTION_RULE}")
 
     raw_validation_ranking = evaluate_predictions(
-        labels["VALIDATION"],
-        raw["VALIDATION"],
+        scored_labels,
+        raw["VALIDATION"].loc[scored_rows],
     )
-    print_ranking_metrics("RAW XGBOOST — VALIDATION", raw_validation_ranking)
+    print_ranking_metrics(
+        "RAW XGBOOST — VALIDATION (forward-scored rows only)",
+        raw_validation_ranking,
+    )
 
     selected_oof = selection[selected]["out_of_fold"]
     scored_rows = selected_oof.notna()
