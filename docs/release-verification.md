@@ -2,14 +2,15 @@
 
 This document records the checks used before presenting RiskForge as a completed portfolio project. It distinguishes automated repository checks from local checks that require the private IEEE-CIS dataset and generated serving artifact.
 
-## Latest verified repository state
+## Final release state
 
 - Default branch: `main`
-- Commit: `9c43a964afc6eca1d0b99332db17d156d866ccb6`
-- GitHub Actions: [RiskForge CI run 41812064127](https://github.com/Sujeet-Kona/RiskForge/actions/runs/41812064127) — completed successfully on 2026-11-04.
-- Local artifact parity: manually run on 2026-11-04 against the local serving artifact `xgb-001 / behavioral-v1 / policy-001`.
+- Final benchmark, robustness reports, architecture/workflow diagrams and technical-defense documentation were merged in [PR #5](https://github.com/Sujeet-Kona/RiskForge/pull/5).
+- The final PR head passed [RiskForge CI run 41816085951](https://github.com/Sujeet-Kona/RiskForge/actions/runs/41816085951) before merge. This run completed lint, compilation, PostgreSQL migrations/schema checks and the full test suite successfully.
+- The merge commit is `fbc2aceb1c7f22eb4fd68e693db3e0cd58edfc48`. The main-branch workflow runs after the merge; the live CI badge in the README links to the latest main-branch result.
+- Local artifact parity was manually run on 2026-11-04 against `xgb-001 / behavioral-v1 / policy-001`, as detailed below.
 
-The dataset and fitted artifact are not committed. A person reproducing the local checks must obtain the IEEE-CIS dataset and build the artifact using the documented workflow.
+The dataset and fitted artifact are intentionally not committed. Reproducing the data/model workflows requires obtaining IEEE-CIS locally and rebuilding the artifact using the documented commands.
 
 ## Offline/API parity result
 
