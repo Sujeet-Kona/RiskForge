@@ -37,8 +37,9 @@ with that one final calibrator.
 Threshold selection uses forward-scored validation rows, while the final
 serving calibrator is fitted on all validation rows. These are not identical
 calibration procedures; consequently, the validation threshold-search cost is
-not an unbiased estimate of deployed policy cost. The frozen TEST evaluation is
-the final held-out check for the resulting model/calibrator/policy combination.
+not an unbiased estimate of deployed policy cost. The held-out TEST metrics
+reported in [model evaluation](model-evaluation.md) are the final model and
+calibrator check. They do not revalidate or promote the active serving policy.
 
 The thresholds currently stored in `policy/locked.py` predate this corrected
 forward-chaining validation protocol. The output from
