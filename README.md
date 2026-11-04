@@ -1,5 +1,7 @@
 # RiskForge
 
+[![RiskForge CI](https://github.com/Sujeet-Kona/RiskForge/actions/workflows/ci.yml/badge.svg)](https://github.com/Sujeet-Kona/RiskForge/actions/workflows/ci.yml)
+
 **A reproducible fraud-risk scoring research project** built around point-in-time
 features, chronological evaluation, probability calibration, cost-sensitive
 decisions, model explanations, a FastAPI inference service, and PostgreSQL audit
@@ -56,7 +58,7 @@ SHAP model signals + separate policy reason
 FastAPI inference service
     |
     v
-PostgreSQL append-only decision audit
+PostgreSQL decision audit (application-level append-only)
 ```
 
 The inference path loads a prebuilt artifact. It does not train, fit a
@@ -80,13 +82,48 @@ calibrator, or contact MLflow while serving requests.
 - **Auditability:** a successful API response is returned only after its
   decision record has been written.
 
+## Measured benchmark results
+
+The following results were reproduced locally on the IEEE-CIS benchmark. The
+dataset and fitted artifacts are not committed; CI tests the application and
+invariants but does not retrain the model.
+
+| Partition | Rows | Fraud cases |
+| --- | ---: | ---: |
+| TRAIN | 414,446 | — |
+| VALIDATION | 88,013 | 3,010 |
+| TEST | 88,081 | 3,065 |
+
+The 28-feature XGBoost model produced the following held-out TEST ranking
+metrics. Isotonic calibration was selected using forward-chaining validation
+OOF Brier score; the calibrated TEST metrics are reported separately from the
+raw model scores.
+
+| TEST metric | Raw XGBoost | Isotonic calibrated |
+| --- | ---: | ---: |
+| PR-AUC | 0.449254 | 0.438919 |
+| ROC-AUC | 0.865318 | 0.864850 |
+| Brier score | — | 0.024204 |
+| Log loss | — | 0.102851 |
+| ECE | — | 0.003553 |
+
+Calibration method selection used 70,334 forward-chaining OOF VALIDATION rows;
+17,679 initial warm-up rows were excluded. Isotonic achieved the lower OOF
+Brier score (0.024703 vs 0.025368 for sigmoid), while sigmoid had better OOF
+log loss and ranking metrics. See [model evaluation](docs/model-evaluation.md)
+for the complete comparison and caveats.
+
+The repository also includes a Logistic Regression baseline implementation.
+No numeric baseline comparison is claimed in this summary until its run output
+is recorded alongside the same split and evaluation protocol.
+
 ## Repository layout
 
 | Path | Responsibility |
 | --- | --- |
 | `ml/features/` | Point-in-time feature engineering |
 | `ml/split/` | Chronological data partitioning |
-| `ml/models/` | Preprocessing, XGBoost, calibration, artifact handling |
+| `ml/models/` | Preprocessing, Logistic Regression baseline, XGBoost, calibration, artifact handling |
 | `policy/` | Decision policy, cost assumptions, policy evaluation |
 | `explain/` | Model attribution and reason-code taxonomy |
 | `app/` | FastAPI schemas, inference service, API lifecycle |
@@ -154,8 +191,16 @@ training service. The serving-artifact builder enforces the locked model and
 calibration configuration described in the source and documentation. Keep the
 generated files local; do not commit dataset files or fitted model binaries.
 
+For the Logistic Regression baseline diagnostic, run:
+
+```bash
+PYTHONPATH=. python scripts/train_logistic_baseline.py
+```
+
 For experiment lineage, see [docs/mlflow.md](docs/mlflow.md). For the exact
 inference contract and artifact lifecycle, see [docs/api.md](docs/api.md).
+Use VALIDATION for model comparisons; do not tune or select models using TEST.
+See [model evaluation](docs/model-evaluation.md) for the recorded benchmark.
 
 ## Run the inference API
 
@@ -234,6 +279,7 @@ fraud-control product.
 ## Detailed documentation
 
 - [Inference API](docs/api.md)
+- [Model evaluation and measured results](docs/model-evaluation.md)
 - [Calibration methodology](docs/calibration.md)
 - [Audit persistence](docs/audit.md)
 - [Explainability](docs/explainability.md)
