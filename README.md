@@ -268,6 +268,9 @@ RiskForge separates measured dataset results from project assumptions:
   guarantee that history is complete, current or authentic.
 - Audit records preserve the scored transaction inputs and decision details,
   but not the full prior-history rows; they are not sufficient to replay a score.
+- Audit append-only behaviour is enforced by application convention, not database
+  privileges or triggers. Request idempotency and duplicate suppression are not
+  implemented; repeated transaction IDs can produce multiple audit rows.
 - The repository does not provide authentication, TLS termination, rate
   limiting, production secrets management, deployment automation, drift
   monitoring, or an operational review workflow.
