@@ -92,6 +92,27 @@ The active serving policy is still `policy-001` (review 0.075, block 0.110). The
 
 ## Robustness and uncertainty
 
+### What did the final benchmark show?
+
+On the single chronological TEST holdout, average precision / ROC-AUC were:
+
+- Logistic Regression: 0.145789 / 0.780255.
+- Random Forest: 0.426033 / 0.861220.
+- XGBoost: 0.449254 / 0.865318.
+
+The paired class-stratified bootstrap 95% interval for XGBoost minus Random
+Forest was [+0.015090, +0.030551] for AP and [+0.001328, +0.007241] for
+ROC-AUC. The bootstrap treats transactions as independent sampling units; it
+does not account for temporal dependence, dataset shift or model retraining
+variability.
+
+XGBoost led AP in all four chronological periods, four amount bands and three
+card-history groups, but it did not win every ProductCD slice or every metric.
+Random Forest narrowly led AP in ProductCD H; it led ROC-AUC in ProductCD S.
+ProductCD H and S have small fraud counts. ProductCD W was weak for both
+models. These are descriptive slices of one holdout, not independent future
+deployments.
+
 ### What does the final benchmark report?
 
 Run `scripts/run_model_benchmark.py`. It writes:
