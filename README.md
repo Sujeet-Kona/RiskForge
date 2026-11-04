@@ -288,3 +288,17 @@ fraud-control product.
 - [Explainability](docs/explainability.md)
 - [MLflow lifecycle tracking](docs/mlflow.md)
 - [CI design and verification scope](docs/ci.md)
+
+## Resume-ready project summary
+
+**RiskForge — Fraud Risk Scoring & Decision Engine**
+
+- Built a reproducible fraud-risk ML pipeline over 590,540 IEEE-CIS transactions using 28 point-in-time behavioral features, chronological evaluation, XGBoost, forward-chaining probability calibration, and SHAP-based explanations.
+- Evaluated the calibrated model on a held-out chronological TEST partition, achieving **0.4389 PR-AUC**, **0.8649 ROC-AUC**, **0.0242 Brier score**, and **0.0036 ECE**. Calibration method selection used forward-chaining VALIDATION OOF predictions; see the evaluation report for trade-offs and limitations.
+- Implemented a FastAPI scoring service with a versioned model artifact and PostgreSQL decision auditing; manually verified offline/API parity on three representative ALLOW, REVIEW, and BLOCK cases, with all 28 features, probabilities, decisions, and reason codes matching.
+
+These bullets describe the current repository and measured benchmark only. They do not imply a deployed payment-network system, production traffic performance, an authoritative transaction-history service, or database-enforced immutable audit storage.
+
+## Release verification
+
+The manual release checks and the latest observed offline/API parity result are recorded in [release verification](docs/release-verification.md). CI status is available from the badge at the top of this README; CI does not train on IEEE-CIS or run the artifact parity replay.
