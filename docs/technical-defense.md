@@ -46,7 +46,7 @@ They provide different capacity/inductive-bias baselines:
 - Random Forest captures nonlinear interactions through bagged decision trees and is less sensitive to numeric scale.
 - XGBoost builds boosted trees sequentially to reduce residual errors and can model nonlinear feature interactions.
 
-All three use the same rows, chronological split and 28 input features. Their preprocessing is fit only on TRAIN. The Random Forest configuration is a fixed baseline, not a hyperparameter search. Do not claim a model won until the generated report exists.
+All three use the same rows, chronological split and 28 input features. Their preprocessing is fit only on TRAIN. The Random Forest configuration is a fixed baseline, not a hyperparameter search. On the recorded TEST holdout, XGBoost achieved AP 0.449254 and ROC-AUC 0.865318, Random Forest achieved AP 0.426033 and ROC-AUC 0.861220, and Logistic Regression achieved AP 0.145789 and ROC-AUC 0.780255. XGBoost led overall on this holdout; do not generalize that result to future payment traffic.
 
 ### Why class weighting?
 
