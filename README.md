@@ -113,9 +113,7 @@ Brier score (0.024703 vs 0.025368 for sigmoid), while sigmoid had better OOF
 log loss and ranking metrics. See [model evaluation](docs/model-evaluation.md)
 for the complete comparison and caveats.
 
-The repository also includes a Logistic Regression baseline implementation.
-No numeric baseline comparison is claimed in this summary until its run output
-is recorded alongside the same split and evaluation protocol.
+The repository includes a reproducible three-model benchmark for Logistic Regression, Random Forest and XGBoost, plus TEST temporal/segment analysis and paired bootstrap intervals. The script is committed, but its private-dataset run must be completed locally before any comparative numeric result is added to this README. See [the benchmark protocol](docs/model-evaluation.md) and [technical defense guide](docs/technical-defense.md).
 
 ## Repository layout
 
@@ -129,7 +127,7 @@ is recorded alongside the same split and evaluation protocol.
 | `app/` | FastAPI schemas, inference service, API lifecycle |
 | `db/` and `alembic/` | PostgreSQL audit model and migrations |
 | `tracking/` | Local MLflow experiment lineage |
-| `scripts/` | Data, training, evaluation, artifact and parity workflows |
+| `scripts/` | Data, training, evaluation, artifact, parity and final benchmark workflows |
 | `tests/` | Unit, API, database and integration tests |
 | `docs/` | Detailed API, audit, CI, explainability and MLflow notes |
 
@@ -282,7 +280,8 @@ fraud-control product.
 ## Detailed documentation
 
 - [Inference API](docs/api.md)
-- [Model evaluation and measured results](docs/model-evaluation.md)
+- [Model evaluation, three-model benchmark and robustness protocol](docs/model-evaluation.md)
+- [Technical defense guide](docs/technical-defense.md)
 - [Calibration methodology](docs/calibration.md)
 - [Audit persistence](docs/audit.md)
 - [Explainability](docs/explainability.md)
