@@ -1,9 +1,11 @@
 # RiskForge audit persistence
 
-One PostgreSQL table receives one row per successful decision. This is an
-**application-level append-only audit store**: the application writes and reads
-records but does not update or delete them. This is not a database-enforced
-immutability guarantee, a feature store, or distributed infrastructure.
+One PostgreSQL table receives one row per successful decision so the reported
+decision details can be inspected later. It is an **application-level
+append-only audit store**: the application writes and reads records but does not
+update or delete them. It does not retain the prior-history rows needed to
+recompute a score. This is not a database-enforced immutability guarantee, a
+feature store, or distributed infrastructure.
 
 ---
 
