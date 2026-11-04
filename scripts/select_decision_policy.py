@@ -65,15 +65,14 @@ REVIEW_CAP_LEVELS = (0.05, 0.10)
 RUNNER_UP_COUNT = 5
 
 METHOD_NOTE = (
-    "The out-of-fold VALIDATION probabilities used for threshold selection are "
-    "produced by five fold-specific isotonic mappings, while the TEST "
-    "probabilities come from the single isotonic calibrator refitted on all of "
-    "VALIDATION — the frozen Phase 3 deployment mapping. The two scales are "
-    "therefore not literally identical. This is an acknowledged limitation of "
-    "the locked Phase 3 design. Out-of-fold selection removes the far larger "
-    "in-sample optimism of tuning thresholds on the probabilities whose labels "
-    "fitted the calibrator, but it is not a perfectly unbiased estimate of the "
-    "deployed policy's cost."
+    "Threshold selection uses forward-chaining out-of-fold VALIDATION "
+    "probabilities: the first chronological fold is a warm-up period and is "
+    "excluded; every later fold is calibrated only from strictly earlier "
+    "folds. TEST probabilities still come from the single isotonic calibrator "
+    "refitted on all VALIDATION — the frozen deployment mapping. The two "
+    "calibration procedures are therefore not identical, and the selected "
+    "thresholds are not a perfectly unbiased estimate of deployed policy cost. "
+    "The reported VALIDATION cost is measured only on the forward-scored rows."
 )
 
 
@@ -211,9 +210,19 @@ def main() -> None:
     )
     oof_seconds = time.perf_counter() - oof_started
 
-    oof_metrics = evaluate_calibration(validation_labels, oof_validation)
+    scored_rows = oof_validation.notna()
+    scored_validation_labels = validation_labels.loc[scored_rows]
+    scored_oof_validation = oof_validation.loc[scored_rows]
 
-    print(f"Folds      : {DEFAULT_CALIBRATION_FOLDS} (chronological)")
+    oof_metrics = evaluate_calibration(
+        scored_validation_labels, scored_oof_validation
+    )
+
+    print(
+        f"Folds      : {DEFAULT_CALIBRATION_FOLDS} "
+        "(forward-chaining; first fold warm-up)"
+    )
+    print(f"Scored rows: {len(scored_oof_validation):,} / {len(oof_validation):,}")
     print(f"Seconds    : {oof_seconds:.2f}")
     print_model_metrics(
         f"OUT-OF-FOLD {LOCKED_CALIBRATION_METHOD.upper()} — VALIDATION",
@@ -221,10 +230,10 @@ def main() -> None:
     )
 
     for label, series in [
-        ("below 0.01", (oof_validation < 0.01).mean()),
-        ("below 0.05", (oof_validation < 0.05).mean()),
-        ("below 0.10", (oof_validation < 0.10).mean()),
-        ("at or above 0.50", (oof_validation >= 0.50).mean()),
+        ("below 0.01", (scored_oof_validation < 0.01).mean()),
+        ("below 0.05", (scored_oof_validation < 0.05).mean()),
+        ("below 0.10", (scored_oof_validation < 0.10).mean()),
+        ("at or above 0.50", (scored_oof_validation >= 0.50).mean()),
     ]:
         print(f"OOF share {label:16s}: {series:.4%}")
 
@@ -237,7 +246,7 @@ def main() -> None:
         "— the grid is searched, not sampled."
     )
 
-    candidates = candidate_thresholds(oof_validation)
+    candidates = candidate_thresholds(scored_oof_validation)
 
     print(f"Candidate threshold values: {candidates.size}")
     print(f"Candidate min / max       : "
@@ -245,8 +254,8 @@ def main() -> None:
 
     search_started = time.perf_counter()
     search = search_thresholds(
-        oof_validation,
-        validation_labels,
+        scored_oof_validation,
+        scored_validation_labels,
         PRIMARY_COSTS,
         candidates=candidates,
         policy_version=DEFAULT_POLICY_VERSION,
@@ -259,12 +268,12 @@ def main() -> None:
           f"{'none' if search.max_review_rate is None else search.max_review_rate}")
     print(f"Search seconds            : {search_seconds:.2f}")
 
-    baselines = degenerate_baseline_costs(validation_labels, PRIMARY_COSTS)
+    baselines = degenerate_baseline_costs(scored_validation_labels, PRIMARY_COSTS)
 
     print("\nDegenerate single-action floors on VALIDATION (ASSUMPTION costs):")
     for name, cost in baselines.items():
         print(f"  {name:14s}: {cost:,.2f} total  "
-              f"({cost / len(validation_labels):.4f} per transaction)")
+              f"({cost / len(scored_validation_labels):.4f} per transaction)")
 
     frozen_config = search.config
     frozen_review = frozen_config.review_threshold
@@ -312,13 +321,15 @@ def main() -> None:
 
     print_section("STEP 6 — VALIDATION RESULTS FOR THE FROZEN POLICY")
     print(
-        "Measured on the out-of-fold calibrated VALIDATION probabilities, i.e. "
-        "the same probabilities the thresholds were chosen from. The cost "
-        "columns mix a measured confusion matrix with ASSUMPTION unit costs."
+        "Measured on forward-chaining out-of-fold VALIDATION probabilities "
+        "(initial warm-up fold excluded), the same rows used for threshold "
+        "selection. Cost columns combine measured outcomes with ASSUMPTION costs."
     )
 
-    print_outcome(f"{frozen_config.policy_version} — VALIDATION (out-of-fold)",
-                  search.outcome)
+    print_outcome(
+        f"{frozen_config.policy_version} — VALIDATION (forward out-of-fold)",
+        search.outcome,
+    )
 
     refit_validation = apply_calibrator(
         fit_calibrator(LOCKED_CALIBRATION_METHOD, raw_validation, validation_labels),
@@ -345,8 +356,8 @@ def main() -> None:
             PRIMARY_COSTS, review_fraud_capture_rate=level
         )
         result = search_thresholds(
-            oof_validation,
-            validation_labels,
+            scored_oof_validation,
+            scored_validation_labels,
             costs,
             candidates=candidates,
             policy_version=DEFAULT_POLICY_VERSION,
