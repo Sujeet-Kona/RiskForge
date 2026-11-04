@@ -213,6 +213,10 @@ RiskForge separates measured dataset results from project assumptions:
   benchmark partition, not future production traffic.
 - The false-positive, false-negative and review costs used for policy selection
   are synthetic assumptions. The resulting thresholds are experimental.
+- The currently committed policy thresholds predate the corrected
+  forward-chaining calibration validation. Rerun the local policy-selection
+  workflow and reconcile its result with `policy/locked.py` before treating
+  those thresholds as revalidated. See [calibration methodology](docs/calibration.md).
 - The service relies on caller-provided history and cannot independently
   guarantee that history is complete, current or authentic.
 - Audit records preserve the scored transaction inputs and decision details,
