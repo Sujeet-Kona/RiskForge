@@ -7,10 +7,20 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import average_precision_score, brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import (
+    average_precision_score,
+    brier_score_loss,
+    log_loss,
+    roc_auc_score,
+)
 
 from ml.data.modeling import MODEL_FEATURES, TARGET_COLUMN
-from ml.models.calibration import apply_calibrator, expected_calibration_error, fit_calibrator, reliability_table
+from ml.models.calibration import (
+    apply_calibrator,
+    expected_calibration_error,
+    fit_calibrator,
+    reliability_table,
+)
 from ml.models.xgboost_model import fit_xgboost_model, predict_fraud_probability
 from ml.split.temporal import temporal_split
 from scripts.run_model_benchmark import (
@@ -257,11 +267,13 @@ def calibration_segment_reports(
                         "fraud_rate": observed_rate,
                         "mean_predicted_probability": float(scores.mean()),
                         "brier_score": float(brier_score_loss(labels, scores)),
-                        "log_loss": float(log_loss(
-                            labels,
-                            np.clip(scores, 1e-15, 1 - 1e-15),
-                            labels=[0, 1],
-                        )),
+                        "log_loss": float(
+                            log_loss(
+                                labels,
+                                np.clip(scores, 1e-15, 1 - 1e-15),
+                                labels=[0, 1],
+                            )
+                        ),
                         "expected_calibration_error": expected_calibration_error(
                             pd.Series(labels), probability, n_bins=n_bins
                         ),
