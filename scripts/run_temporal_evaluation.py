@@ -33,7 +33,7 @@ from scripts.run_model_benchmark import (
 DEFAULT_OUTPUT = Path("reports/temporal_robustness")
 DEFAULT_FOLDS = 4
 DEFAULT_TEST_FRACTION = 0.10
-DEFAULT_BLOCK_LENGTH = 50
+DEFAULT_BLOCK_DURATION_SECONDS = 86_400
 DEFAULT_BOOTSTRAP_REPLICATES = 500
 DEFAULT_SEED = 20261107
 
@@ -97,7 +97,7 @@ def moving_time_block_indices(
     timestamps: pd.Series,
     rng: np.random.Generator,
     *,
-    block_length: int,
+    block_duration_seconds: int,
 ) -> np.ndarray:
     """Sample chronological moving blocks of complete timestamp groups.
 
@@ -106,8 +106,8 @@ def moving_time_block_indices(
     Blocks are sampled without circular wrap-around; the final block is
     shortened to reach the original number of timestamp groups.
     """
-    if block_length < 1:
-        raise ValueError("block_length must be at least 1.")
+    if block_duration_seconds < 1:
+        raise ValueError("block_duration_seconds must be at least 1.")
     if timestamps.empty or timestamps.isna().any():
         raise ValueError("timestamps must be non-empty and contain no missing values.")
     if not timestamps.is_monotonic_increasing:
@@ -115,14 +115,15 @@ def moving_time_block_indices(
 
     group_codes, unique = pd.factorize(timestamps, sort=True)
     n_groups = len(unique)
-    if block_length > n_groups:
-        raise ValueError("block_length cannot exceed distinct timestamp count.")
-
     row_groups = [np.flatnonzero(group_codes == i) for i in range(n_groups)]
     selected_groups: list[int] = []
     while len(selected_groups) < n_groups:
-        start = int(rng.integers(0, n_groups - block_length + 1))
-        take = min(block_length, n_groups - len(selected_groups))
+        start = int(rng.integers(0, n_groups))
+        end = int(np.searchsorted(
+            unique, unique[start] + block_duration_seconds, side="left"
+        ))
+        end = max(end, start + 1)
+        take = min(end - start, n_groups - len(selected_groups))
         selected_groups.extend(range(start, start + take))
 
     return np.concatenate([row_groups[group] for group in selected_groups])
@@ -134,7 +135,7 @@ def time_block_bootstrap(
     predictions: dict[str, np.ndarray],
     *,
     replicates: int = DEFAULT_BOOTSTRAP_REPLICATES,
-    block_length: int = DEFAULT_BLOCK_LENGTH,
+    block_duration_seconds: int = DEFAULT_BLOCK_DURATION_SECONDS,
     seed: int = DEFAULT_SEED,
 ) -> pd.DataFrame:
     """Paired moving-time-block bootstrap for ranking-metric differences."""
@@ -158,7 +159,7 @@ def time_block_bootstrap(
     deltas = {"average_precision": [], "roc_auc": []}
     for _ in range(replicates):
         sampled = moving_time_block_indices(
-            timestamps, rng, block_length=block_length
+            timestamps, rng, block_duration_seconds=block_duration_seconds
         )
         labels = y[sampled]
         if len(np.unique(labels)) < 2:
@@ -182,7 +183,7 @@ def time_block_bootstrap(
         if len(values) < int(replicates * 0.90):
             raise RuntimeError(
                 "Too many single-class time-block replicates; increase "
-                "block_length or inspect the temporal label distribution."
+                "block duration or inspect the temporal label distribution."
             )
         rows.append(
             {
@@ -193,7 +194,7 @@ def time_block_bootstrap(
                 "ci_95_high": float(np.quantile(values, 0.975)),
                 "valid_replicates": len(values),
                 "requested_replicates": replicates,
-                "block_length_timestamp_groups": block_length,
+                "block_duration_seconds": block_duration_seconds,
                 "method": "paired_moving_time_block_percentile_bootstrap",
                 "seed": seed,
             }
@@ -391,7 +392,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--folds", type=int, default=DEFAULT_FOLDS)
     parser.add_argument("--test-fraction", type=float, default=DEFAULT_TEST_FRACTION)
-    parser.add_argument("--block-length", type=int, default=DEFAULT_BLOCK_LENGTH)
+    parser.add_argument("--block-duration-seconds", type=int, default=DEFAULT_BLOCK_DURATION_SECONDS)
     parser.add_argument("--bootstrap-replicates", type=int, default=DEFAULT_BOOTSTRAP_REPLICATES)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     args = parser.parse_args()
@@ -424,7 +425,7 @@ def main() -> None:
         split.test["TransactionDT"].reset_index(drop=True),
         predictions,
         replicates=args.bootstrap_replicates,
-        block_length=args.block_length,
+        block_duration_seconds=args.block_duration_seconds,
         seed=args.seed,
     )
     block_ci.to_csv(args.output_dir / "test_time_block_bootstrap.csv", index=False)
@@ -462,9 +463,10 @@ def main() -> None:
         },
         "time_block_bootstrap": {
             "replicates_requested": args.bootstrap_replicates,
-            "block_length_timestamp_groups": args.block_length,
+            "block_duration_seconds": args.block_duration_seconds,
             "seed": args.seed,
             "method": "paired moving blocks of complete distinct TransactionDT groups",
+            "duration_units": "TransactionDT elapsed-time units (seconds)",
         },
         "interpretation": (
             "Walk-forward folds are repeated historical simulations, not "
