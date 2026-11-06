@@ -75,6 +75,16 @@ and does not yet contain source-file fingerprints. A fresh local benchmark run
 with the private dataset files will generate updated metadata. The dataset
 itself must not be committed.
 
+## Additional temporal robustness checks
+
+The additional expanding-window and time-block bootstrap experiment is
+documented in [temporal evaluation](temporal_evaluation.md). It is separate
+from the locked benchmark and requires the same local IEEE-CIS inputs.
+
+```bash
+PYTHONPATH=. python scripts/run_temporal_evaluation.py
+```
+
 ## Local API and database checks
 
 Start PostgreSQL 17 and apply migrations:

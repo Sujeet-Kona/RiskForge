@@ -125,6 +125,16 @@ The rolling behavioral implementation enforces the following:
 
 The split is chronological by distinct `TransactionDT` values (70% / 15% / 15% of distinct timestamps). Row counts can differ slightly from those exact percentages because timestamp groups remain intact.
 
+## Additional temporal robustness evaluation
+
+The locked benchmark uses one chronological holdout. An additional expanding-window
+experiment, paired moving-time-block bootstrap, and segmented calibration
+reliability reports are available in
+[`docs/temporal_evaluation.md`](docs/temporal_evaluation.md). These experiments
+do not replace the locked benchmark or alter the serving model/policy. They
+must be run locally with the IEEE-CIS source data; no new metrics are claimed
+until those runs complete.
+
 ## Model evaluation
 
 ### Candidate comparison on the held-out TEST partition
