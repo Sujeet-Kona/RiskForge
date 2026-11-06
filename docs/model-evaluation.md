@@ -87,6 +87,12 @@ The benchmark writes:
 - `reports/model_benchmark/test_bootstrap_intervals.csv`
 - `reports/model_benchmark/run_metadata.json`
 
+The run metadata also fingerprints both source inputs (relative path, byte size,
+and SHA-256), records the Python/platform and key numerical-library versions,
+and captures the Git commit when the benchmark is run inside a Git checkout.
+This makes it possible to distinguish a rerun on changed data or software from
+the committed historical report; it does not package or redistribute IEEE-CIS.
+
 ## Interpretation limits
 
 These measurements describe one chronological split of IEEE-CIS. They do not establish performance on current or future payment traffic. The bootstrap intervals quantify resampling uncertainty within this holdout, not production uncertainty. The project does not implement live drift monitoring or continuous retraining.
