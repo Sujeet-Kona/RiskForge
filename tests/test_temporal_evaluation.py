@@ -44,7 +44,7 @@ def test_expanding_windows_reject_invalid_fold_configuration():
 def test_moving_block_sample_preserves_complete_timestamp_groups_and_order():
     timestamps = pd.Series(np.repeat(np.arange(30), [1, 2, 3] * 10))
     indices = moving_time_block_indices(
-        timestamps, np.random.default_rng(5), block_length=4
+        timestamps, np.random.default_rng(5), block_duration_seconds=4
     )
     sampled_times = timestamps.iloc[indices].to_numpy()
 
@@ -93,7 +93,7 @@ def test_time_block_bootstrap_rejects_bad_inputs():
         time_block_bootstrap(
             np.zeros_like(y), timestamps,
             {"xgboost": scores, "random_forest": scores},
-            replicates=100, block_length=5,
+            replicates=100, block_duration_seconds=5,
         )
 
 
