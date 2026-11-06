@@ -40,6 +40,10 @@ splitting simultaneous transactions.
   deviation, minimum and maximum across folds.
 - `reports/temporal_robustness/test_time_block_bootstrap.csv`: paired
   percentile intervals for Average Precision and ROC-AUC differences.
+- `reports/temporal_robustness/test_calibration_segments.csv`: raw and
+  isotonic-calibrated probability quality by chronological and amount segment.
+- `reports/temporal_robustness/test_calibration_reliability_bins.csv`: bin-level
+  predicted-versus-observed rates for reliability plots.
 - `reports/temporal_robustness/run_metadata.json`: fold, block and seed
   configuration plus interpretation boundaries.
 
