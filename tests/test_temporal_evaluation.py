@@ -48,12 +48,19 @@ def test_moving_block_sample_preserves_complete_timestamp_groups_and_order():
     sampled_times = timestamps.iloc[indices].to_numpy()
 
     assert len(sampled_times) >= len(timestamps)
-    cursor = 0
-    while cursor < len(sampled_times):
-        current = sampled_times[cursor]
-        count = int((sampled_times == current).sum())
-        assert count % [1, 2, 3][int(current) % 3] == 0
-        cursor += count
+    for timestamp in np.unique(sampled_times):
+        sampled_count = int((sampled_times == timestamp).sum())
+        original_count = int((timestamps == timestamp).sum())
+        assert sampled_count % original_count == 0
+
+    run_start = 0
+    for position in range(1, len(sampled_times) + 1):
+        if position == len(sampled_times) or sampled_times[position] != sampled_times[run_start]:
+            run_length = position - run_start
+            timestamp = sampled_times[run_start]
+            original_count = int((timestamps == timestamp).sum())
+            assert run_length % original_count == 0
+            run_start = position
 
 
 def test_time_block_bootstrap_is_reproducible_and_paired():
