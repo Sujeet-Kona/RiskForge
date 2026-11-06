@@ -29,8 +29,9 @@ the next chronological window. Boundaries are defined over distinct
 
 It also reruns the locked TRAIN/TEST split and computes paired moving-time-block
 bootstrap intervals for XGBoost minus Random Forest on TEST. Sampling units are
-complete timestamp groups; contiguous blocks span the configured TransactionDT duration and preserve local order and avoid
-splitting simultaneous transactions.
+complete timestamp groups. Contiguous blocks span the configured
+`TransactionDT` duration, preserve local order, and never split simultaneous
+transactions.
 
 ## Outputs
 
@@ -52,7 +53,8 @@ splitting simultaneous transactions.
 Walk-forward windows are repeated historical simulations on the same dataset,
 not independent datasets. The expanding-window result is sensitive to the
 chosen start fraction and window sizes. The block-bootstrap interval is
-conditional on the fixed TEST holdout and chosen elapsed-time duration per block; it is not a guarantee about future periods.
+conditional on the fixed TEST holdout and chosen elapsed-time duration per block; it is not a guarantee about future
+periods.
 
 The existing decision-policy script already reports sensitivity to assumed
 review effectiveness and review-volume caps. The calibration script already
