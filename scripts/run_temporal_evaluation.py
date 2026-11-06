@@ -12,8 +12,6 @@ from ml.data.modeling import MODEL_FEATURES, TARGET_COLUMN
 from ml.models.xgboost_model import fit_xgboost_model, predict_fraud_probability
 from ml.split.temporal import temporal_split
 from scripts.run_model_benchmark import (
-    BEHAVIORAL_PATH,
-    TRANSACTION_PATH,
     build_random_forest,
     load_modeling_data,
     metric_values,
@@ -57,7 +55,6 @@ def expanding_window_slices(
     if initial_train < 2 or len(unique) - initial_train < n_splits:
         raise ValueError("Not enough distinct timestamps for requested folds.")
 
-    remaining = len(unique) - initial_train
     boundaries = np.linspace(
         initial_train, len(unique), n_splits + 1, dtype=int
     )
