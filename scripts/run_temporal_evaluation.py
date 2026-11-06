@@ -7,8 +7,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import average_precision_score, brier_score_loss, log_loss, roc_auc_score
 
 from ml.data.modeling import MODEL_FEATURES, TARGET_COLUMN
+from ml.models.calibration import apply_calibrator, expected_calibration_error, fit_calibrator, reliability_table
 from ml.models.xgboost_model import fit_xgboost_model, predict_fraud_probability
 from ml.split.temporal import temporal_split
 from scripts.run_model_benchmark import (
@@ -189,6 +191,111 @@ def time_block_bootstrap(
     return pd.DataFrame(rows)
 
 
+def make_calibration_groups(
+    scored: pd.DataFrame, training: pd.DataFrame
+) -> pd.DataFrame:
+    """Create time and amount groups without using scored-partition labels."""
+    groups = pd.DataFrame(index=scored.index)
+    time_rank = scored["TransactionDT"].rank(method="dense")
+    periods = pd.qcut(time_rank, q=4, labels=False, duplicates="drop")
+    groups["time_period"] = periods.map(
+        lambda value: f"period_{int(value) + 1}" if pd.notna(value) else "unknown"
+    )
+
+    amount_edges = np.unique(
+        training["TransactionAmt"].quantile([0.25, 0.50, 0.75]).to_numpy()
+    )
+    amount_edges = np.unique(np.concatenate(([-np.inf], amount_edges, [np.inf])))
+    labels = [f"amount_band_{i + 1}" for i in range(len(amount_edges) - 1)]
+    groups["amount_band"] = pd.cut(
+        scored["TransactionAmt"],
+        bins=amount_edges,
+        labels=labels,
+        include_lowest=True,
+    ).astype("string")
+    return groups
+
+
+def calibration_segment_reports(
+    y_true: np.ndarray,
+    raw_scores: np.ndarray,
+    calibrated_scores: np.ndarray,
+    groups: pd.DataFrame,
+    *,
+    n_bins: int = 10,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Report calibration metrics and reliability bins by time and amount."""
+    y = np.asarray(y_true, dtype=int)
+    raw = np.asarray(raw_scores, dtype=float)
+    calibrated = np.asarray(calibrated_scores, dtype=float)
+    if not (len(y) == len(raw) == len(calibrated) == len(groups)):
+        raise ValueError("Labels, scores and groups must have equal lengths.")
+
+    metric_rows = []
+    bin_rows = []
+    for dimension in groups.columns:
+        values = groups[dimension].fillna("__MISSING__").astype(str).to_numpy()
+        for segment in sorted(np.unique(values)):
+            mask = values == segment
+            labels = y[mask]
+            if not len(labels):
+                continue
+            for score_name, scores in (
+                ("raw", raw[mask]),
+                ("isotonic_calibrated", calibrated[mask]),
+            ):
+                probability = pd.Series(scores)
+                observed_rate = float(labels.mean())
+                both_classes = len(np.unique(labels)) == 2
+                metric_rows.append(
+                    {
+                        "dimension": dimension,
+                        "segment": segment,
+                        "score_type": score_name,
+                        "rows": int(mask.sum()),
+                        "fraud_cases": int(labels.sum()),
+                        "fraud_rate": observed_rate,
+                        "mean_predicted_probability": float(scores.mean()),
+                        "brier_score": float(brier_score_loss(labels, scores)),
+                        "log_loss": float(log_loss(
+                            labels,
+                            np.clip(scores, 1e-15, 1 - 1e-15),
+                            labels=[0, 1],
+                        )),
+                        "expected_calibration_error": expected_calibration_error(
+                            pd.Series(labels), probability, n_bins=n_bins
+                        ),
+                        "average_precision": (
+                            float(average_precision_score(labels, scores))
+                            if both_classes else float("nan")
+                        ),
+                        "roc_auc": (
+                            float(roc_auc_score(labels, scores))
+                            if both_classes else float("nan")
+                        ),
+                        "ranking_status": (
+                            "ok" if both_classes else "single_class_segment"
+                        ),
+                    }
+                )
+                for entry in reliability_table(
+                    pd.Series(labels), probability, n_bins=n_bins
+                ):
+                    bin_rows.append(
+                        {
+                            "dimension": dimension,
+                            "segment": segment,
+                            "score_type": score_name,
+                            "bin_lower": entry.lower,
+                            "bin_upper": entry.upper,
+                            "mean_predicted_probability": entry.mean_predicted_probability,
+                            "observed_fraud_rate": entry.observed_fraud_rate,
+                            "count": entry.count,
+                        }
+                    )
+    return pd.DataFrame(metric_rows), pd.DataFrame(bin_rows)
+
+
 def evaluate_walk_forward(
     data: pd.DataFrame,
     *,
@@ -309,6 +416,28 @@ def main() -> None:
         seed=args.seed,
     )
     block_ci.to_csv(args.output_dir / "test_time_block_bootstrap.csv", index=False)
+
+    raw_validation = predict_fraud_probability(xgb, split.validation)
+    raw_test = pd.Series(predictions["xgboost"], index=split.test.index)
+    calibrator = fit_calibrator(
+        "isotonic",
+        raw_validation,
+        split.validation[TARGET_COLUMN],
+    )
+    calibrated_test = apply_calibrator(calibrator, raw_test)
+    calibration_groups = make_calibration_groups(split.test, split.train)
+    calibration_metrics, calibration_bins = calibration_segment_reports(
+        split.test[TARGET_COLUMN].to_numpy(dtype=int),
+        raw_test.to_numpy(dtype=float),
+        calibrated_test.to_numpy(dtype=float),
+        calibration_groups,
+    )
+    calibration_metrics.to_csv(
+        args.output_dir / "test_calibration_segments.csv", index=False
+    )
+    calibration_bins.to_csv(
+        args.output_dir / "test_calibration_reliability_bins.csv", index=False
+    )
 
     metadata = {
         "dataset": "IEEE-CIS Fraud Detection",
