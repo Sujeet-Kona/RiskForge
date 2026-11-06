@@ -128,7 +128,8 @@ The split is chronological by distinct `TransactionDT` values (70% / 15% / 15% o
 ## Additional temporal robustness evaluation
 
 The locked benchmark uses one chronological holdout. An additional expanding-window
-experiment and paired moving-time-block bootstrap are available in
+experiment, paired moving-time-block bootstrap, and segmented calibration
+reliability reports are available in
 [`docs/temporal_evaluation.md`](docs/temporal_evaluation.md). These experiments
 do not replace the locked benchmark or alter the serving model/policy. They
 must be run locally with the IEEE-CIS source data; no new metrics are claimed
