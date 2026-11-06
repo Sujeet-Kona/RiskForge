@@ -87,11 +87,12 @@ The benchmark writes:
 - `reports/model_benchmark/test_bootstrap_intervals.csv`
 - `reports/model_benchmark/run_metadata.json`
 
-The run metadata also fingerprints both source inputs (relative path, byte size,
-and SHA-256), records the Python/platform and key numerical-library versions,
-and captures the Git commit when the benchmark is run inside a Git checkout.
-This makes it possible to distinguish a rerun on changed data or software from
-the committed historical report; it does not package or redistribute IEEE-CIS.
+New benchmark runs now write source-input fingerprints (relative path, byte
+size, and SHA-256), Python/platform details, key numerical-library versions,
+and the Git commit (when run inside a Git checkout) into
+`run_metadata.json`. The committed metadata predates this addition and will
+gain those fields when the benchmark is next rerun with the local IEEE-CIS
+inputs. This does not package or redistribute the dataset.
 
 ## Interpretation limits
 
