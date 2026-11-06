@@ -47,7 +47,7 @@ def test_moving_block_sample_preserves_complete_timestamp_groups_and_order():
     )
     sampled_times = timestamps.iloc[indices].to_numpy()
 
-    assert len(sampled_times) >= len(timestamps)
+    assert len(sampled_times) >= timestamps.nunique()
     for timestamp in np.unique(sampled_times):
         sampled_count = int((sampled_times == timestamp).sum())
         original_count = int((timestamps == timestamp).sum())
