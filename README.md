@@ -178,9 +178,9 @@ Isotonic was selected because Brier score was the predeclared selection criterio
 | ROC-AUC | 0.865318 | 0.864850 |
 | Brier score | 0.101228 | **0.024204** |
 | Log loss | 0.344462 | **0.102851** |
-| Expected Calibration Error (10 equal-width bins) | See calibration run output | 0.003553 |
+| Expected Calibration Error (10 equal-width bins) | Not included in the saved benchmark CSV | 0.003553 |
 
-The Brier score fell by approximately **76.1%** on TEST (0.101228 to 0.024204). Calibration improves probability quality, not ranking: isotonic's stepwise mapping can create tied scores, which explains the small reduction in Average Precision and ROC-AUC. The raw TEST ECE is printed by the calibration script; no percentage ECE reduction is claimed in this README.
+The Brier score fell by approximately **76.1%** on TEST (0.101228 to 0.024204). Calibration improves probability quality, not ranking: isotonic's stepwise mapping can create tied scores, which explains the small reduction in Average Precision and ROC-AUC. The calibration script prints raw TEST ECE during a full run, but that baseline is not included in the committed benchmark CSV; no percentage ECE reduction is claimed here.
 
 ### Subgroup and temporal-slice analysis
 
