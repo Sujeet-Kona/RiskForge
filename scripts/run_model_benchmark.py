@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import platform
+import subprocess
+import sys
 import time
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Callable
 
@@ -40,6 +45,46 @@ BEHAVIORAL_PATH = Path("data/processed/train_behavioral_v1.parquet")
 TRANSACTION_PATH = Path("data/raw/ieee_cis/train_transaction.csv")
 DEFAULT_OUTPUT = Path("reports/model_benchmark")
 BOOTSTRAP_SEED = 20261104
+
+
+def file_fingerprint(path: Path) -> dict[str, str | int]:
+    """Return a stable content fingerprint for a source dataset file."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Required benchmark input is missing: {path}")
+
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+
+    return {
+        "path": str(path),
+        "size_bytes": path.stat().st_size,
+        "sha256": digest.hexdigest(),
+    }
+
+
+def runtime_provenance() -> dict:
+    """Capture the runtime needed to interpret and reproduce benchmark output."""
+    packages = {}
+    for distribution in ("numpy", "pandas", "pyarrow", "scikit-learn", "xgboost"):
+        try:
+            packages[distribution] = version(distribution)
+        except PackageNotFoundError:
+            packages[distribution] = None
+
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return {
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "packages": packages,
+        "git_commit": revision.stdout.strip() if revision.returncode == 0 else None,
+    }
 
 
 def load_modeling_data() -> pd.DataFrame:
@@ -409,6 +454,11 @@ def main() -> None:
 
     metadata = {
         "dataset": "IEEE-CIS Fraud Detection",
+        "inputs": {
+            "behavioral_features": file_fingerprint(BEHAVIORAL_PATH),
+            "transaction_source": file_fingerprint(TRANSACTION_PATH),
+        },
+        "runtime": runtime_provenance(),
         "split": "chronological 70/15/15 by distinct TransactionDT values",
         "feature_count": len(MODEL_FEATURES),
         "features": MODEL_FEATURES,
