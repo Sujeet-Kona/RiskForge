@@ -115,6 +115,10 @@ def moving_time_block_indices(
 
     group_codes, unique = pd.factorize(timestamps, sort=True)
     n_groups = len(unique)
+    if block_duration_seconds >= unique[-1] - unique[0]:
+        raise ValueError(
+            "block_duration_seconds must be shorter than the observed time span."
+        )
     row_groups = [np.flatnonzero(group_codes == i) for i in range(n_groups)]
     selected_groups: list[int] = []
     while len(selected_groups) < n_groups:
