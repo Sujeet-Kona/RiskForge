@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from scripts.run_temporal_evaluation import (
+    calibration_segment_reports,
     expanding_window_slices,
     moving_time_block_indices,
     time_block_bootstrap,
@@ -94,3 +95,27 @@ def test_time_block_bootstrap_rejects_bad_inputs():
             {"xgboost": scores, "random_forest": scores},
             replicates=100, block_length=5,
         )
+
+
+
+def test_calibration_segment_report_covers_each_segment_and_score_type():
+    labels = np.tile([0, 0, 0, 1], 50)
+    raw = np.linspace(0.01, 0.8, len(labels))
+    calibrated = np.clip(raw * 0.5, 0.0, 1.0)
+    groups = pd.DataFrame(
+        {
+            "time_period": np.repeat(["early", "late"], 100),
+            "amount_band": np.tile(np.repeat(["low", "high"], 50), 2),
+        }
+    )
+
+    metrics, bins = calibration_segment_reports(
+        labels, raw, calibrated, groups, n_bins=5
+    )
+
+    assert len(metrics) == 8
+    assert set(metrics["score_type"]) == {"raw", "isotonic_calibrated"}
+    assert set(metrics["dimension"]) == {"time_period", "amount_band"}
+    assert (metrics["rows"] > 0).all()
+    assert (metrics["brier_score"] >= 0).all()
+    assert bins["count"].sum() == len(labels) * 2 * 2
