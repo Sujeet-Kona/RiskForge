@@ -200,7 +200,6 @@ def evaluate_walk_forward(
         test_fraction=test_fraction,
     )
     rows = []
-    timings = []
     for fold_number, (train_positions, test_positions) in enumerate(folds, 1):
         train = data.iloc[train_positions]
         test = data.iloc[test_positions]
@@ -239,10 +238,8 @@ def evaluate_walk_forward(
                     "test_start_transaction_dt": int(test["TransactionDT"].min()),
                     "test_end_transaction_dt": int(test["TransactionDT"].max()),
                     **metrics,
+                    "fit_seconds": fit_seconds,
                 }
-            )
-            timings.append(
-                {"fold": fold_number, "model": model_name, "fit_seconds": fit_seconds}
             )
 
     report = pd.DataFrame(rows)
@@ -260,7 +257,7 @@ def evaluate_walk_forward(
             mean_log_loss=("log_loss", "mean"),
         )
     )
-    return report, summary.assign(fit_timings=json.dumps(timings))
+    return report, summary
 
 
 def main() -> None:
