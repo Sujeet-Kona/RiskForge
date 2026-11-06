@@ -158,6 +158,13 @@ def time_block_bootstrap(
         )
         deltas["roc_auc"].append(xgb_metrics["roc_auc"] - rf_metrics["roc_auc"])
 
+    full_xgb = metric_values(y, predictions["xgboost"])
+    full_rf = metric_values(y, predictions["random_forest"])
+    observed_deltas = {
+        "average_precision": full_xgb["pr_auc"] - full_rf["pr_auc"],
+        "roc_auc": full_xgb["roc_auc"] - full_rf["roc_auc"],
+    }
+
     rows = []
     for metric, values in deltas.items():
         if len(values) < int(replicates * 0.90):
@@ -169,6 +176,7 @@ def time_block_bootstrap(
             {
                 "comparison": "xgboost_minus_random_forest",
                 "metric": metric,
+                "estimate": observed_deltas[metric],
                 "ci_95_low": float(np.quantile(values, 0.025)),
                 "ci_95_high": float(np.quantile(values, 0.975)),
                 "valid_replicates": len(values),
