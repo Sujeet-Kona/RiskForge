@@ -74,7 +74,7 @@ def test_time_block_bootstrap_is_reproducible_and_paired():
     }
     kwargs = {
         "replicates": 100,
-        "block_length": 10,
+        "block_duration_seconds": 10,
         "seed": 23,
     }
     first = time_block_bootstrap(y, timestamps, predictions, **kwargs)
