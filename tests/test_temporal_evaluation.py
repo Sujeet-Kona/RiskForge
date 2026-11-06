@@ -41,7 +41,7 @@ def test_expanding_windows_reject_invalid_fold_configuration():
         expanding_window_slices(pd.Series(range(20)), n_splits=4, test_fraction=0.2)
 
 
-def test_moving_block_sample_preserves_complete_timestamp_groups_and_order():
+def test_moving_block_sample_preserves_complete_timestamp_groups():
     timestamps = pd.Series(np.repeat(np.arange(30), [1, 2, 3] * 10))
     indices = moving_time_block_indices(
         timestamps, np.random.default_rng(5), block_duration_seconds=4
@@ -56,7 +56,10 @@ def test_moving_block_sample_preserves_complete_timestamp_groups_and_order():
 
     run_start = 0
     for position in range(1, len(sampled_times) + 1):
-        if position == len(sampled_times) or sampled_times[position] != sampled_times[run_start]:
+        if (
+            position == len(sampled_times)
+            or sampled_times[position] != sampled_times[run_start]
+        ):
             run_length = position - run_start
             timestamp = sampled_times[run_start]
             original_count = int((timestamps == timestamp).sum())
@@ -91,9 +94,11 @@ def test_time_block_bootstrap_rejects_bad_inputs():
     scores = np.linspace(0.0, 1.0, len(y))
     with pytest.raises(ValueError, match="both classes"):
         time_block_bootstrap(
-            np.zeros_like(y), timestamps,
+            np.zeros_like(y),
+            timestamps,
             {"xgboost": scores, "random_forest": scores},
-            replicates=100, block_duration_seconds=5,
+            replicates=100,
+            block_duration_seconds=5,
         )
 
 
