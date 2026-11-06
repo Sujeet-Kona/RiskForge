@@ -366,6 +366,12 @@ def main() -> None:
     if args.bootstrap_replicates < 100:
         parser.error("--bootstrap-replicates must be at least 100.")
 
+    input_provenance = {
+        "behavioral_features": file_fingerprint(BEHAVIORAL_PATH),
+        "transaction_source": file_fingerprint(TRANSACTION_PATH),
+    }
+    runtime = runtime_provenance()
+
     print("Loading and validating the 28-feature modeling frame...")
     modeling = load_modeling_data()
     split = temporal_split(modeling)
@@ -454,11 +460,8 @@ def main() -> None:
 
     metadata = {
         "dataset": "IEEE-CIS Fraud Detection",
-        "inputs": {
-            "behavioral_features": file_fingerprint(BEHAVIORAL_PATH),
-            "transaction_source": file_fingerprint(TRANSACTION_PATH),
-        },
-        "runtime": runtime_provenance(),
+        "inputs": input_provenance,
+        "runtime": runtime,
         "split": "chronological 70/15/15 by distinct TransactionDT values",
         "feature_count": len(MODEL_FEATURES),
         "features": MODEL_FEATURES,
