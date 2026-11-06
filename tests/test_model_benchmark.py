@@ -1,7 +1,11 @@
+import hashlib
+
 import numpy as np
 import pandas as pd
+import pytest
 
 from scripts.run_model_benchmark import (
+    file_fingerprint,
     make_test_groups,
     stratified_bootstrap,
 )
@@ -62,3 +66,23 @@ def test_stratified_bootstrap_is_reproducible_and_reports_paired_deltas():
     pd.testing.assert_frame_equal(first, second)
     assert "xgboost_minus_logistic_regression" in set(first["comparison"])
     assert (first["ci_95_low"] <= first["ci_95_high"]).all()
+
+
+
+def test_file_fingerprint_records_content_hash_and_size(tmp_path):
+    path = tmp_path / "transactions.csv"
+    content = b"TransactionID,isFraud\n1,0\n2,1\n"
+    path.write_bytes(content)
+
+    fingerprint = file_fingerprint(path)
+
+    assert fingerprint == {
+        "path": str(path),
+        "size_bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+
+def test_file_fingerprint_rejects_missing_input(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Required benchmark input"):
+        file_fingerprint(tmp_path / "missing.parquet")
