@@ -138,7 +138,7 @@ function App() {
 
   const historyCount = useMemo(() => {
     try {
-      const parsed = JSON.parse(historyText) as unknown;
+      const parsed = JSON.parse(historyText.trim() || "[]") as unknown;
       return Array.isArray(parsed) ? parsed.length : 0;
     } catch {
       return 0;
@@ -157,7 +157,7 @@ function App() {
 
     let history: HistoryTransaction[];
     try {
-      const parsed: unknown = JSON.parse(historyText);
+      const parsed: unknown = JSON.parse(historyText.trim() || "[]");
       if (!Array.isArray(parsed)) throw new Error("History must be a JSON array.");
       history = parsed as HistoryTransaction[];
     } catch (err) {
@@ -192,7 +192,8 @@ function App() {
         top_k: Number(form.topK),
       }, idempotencyKey);
       setResult(response);
-      setIdempotencyKey(crypto.randomUUID());
+      // Keep this key for retries of the exact same form payload. Editing any
+      // field rotates it in update(), so a changed request gets a fresh key.
       void refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scoring request failed.");
