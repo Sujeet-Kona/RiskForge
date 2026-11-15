@@ -95,7 +95,7 @@ def list_decisions(
     limit: int,
     offset: int,
     decision: str | None = None,
-):
+) -> tuple[list[AuditRecord], int]:
     """Read a bounded decision-history page without exposing persistence details."""
     try:
         return store.list_audit_records(
