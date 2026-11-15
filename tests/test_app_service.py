@@ -66,6 +66,7 @@ def test_a_scored_transaction_returns_a_complete_assessment(serving_service, sco
     assert assessment.model_version == serving_service.artifact.model_version
     assert assessment.feature_version == serving_service.artifact.feature_version
     assert assessment.calibration_method == serving_service.artifact.calibration_method
+    assert to_response(assessment).calibration_method == serving_service.artifact.calibration_method
     assert assessment.history_transactions_used == len(score_payload["history"])
 
 

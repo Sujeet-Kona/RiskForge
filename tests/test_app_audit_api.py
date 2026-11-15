@@ -416,6 +416,7 @@ def test_authenticated_review_queue_returns_original_decision(
     assert case["decision"] == "REVIEW"
     assert case["transaction_id"] == audit_record.transaction_id
     assert case["model_version"] == audit_record.model_version
+    assert case["calibration_method"] == audit_record.calibration_method
     assert case["reason_codes"] == audit_record.reason_codes
 
 
@@ -470,6 +471,7 @@ def test_health_reports_a_ready_audit_store(client):
     body = client.get("/health").json()
 
     assert body["status"] == "ok"
+    assert body["calibration_method"] == "isotonic"
     assert body["database"] == "ready"
 
 

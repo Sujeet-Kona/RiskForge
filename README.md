@@ -65,7 +65,7 @@ flowchart TB
 
 - Offline feature generation and online scoring use the same behavioral feature implementation.
 - The API loads a frozen local artifact at startup; it does not train a fallback model during requests.
-- Each response and audit row records the artifact's calibration method alongside model, feature-contract, and policy identifiers.
+- Each scoring response, decision-history row, and review case records the artifact's calibration method alongside model, feature-contract, and policy identifiers.
 - Prior transaction history is supplied by the caller. PostgreSQL stores decisions but is not used as a feature-history store.
 - TreeSHAP model signals and policy-threshold explanations are separate outputs.
 - MLflow is used for offline experiment tracking only; it is not called in the inference path.

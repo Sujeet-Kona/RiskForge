@@ -69,6 +69,7 @@ export interface AuditDecisionSummary {
   decision: Decision;
   model_version: string;
   feature_version: string;
+  calibration_method: string;
   policy_version: string;
   created_at: string | null;
 }
@@ -127,6 +128,7 @@ export interface ReviewCase {
   scored_inputs: Record<string, unknown>;
   model_version: string;
   feature_version: string;
+  calibration_method: string;
   policy_version: string;
 }
 

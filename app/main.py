@@ -263,6 +263,7 @@ def create_app(
                     decision=record.decision,
                     model_version=record.model_version,
                     feature_version=record.feature_version,
+                    calibration_method=record.calibration_method,
                     policy_version=record.policy_version,
                     created_at=record.created_at,
                 )
