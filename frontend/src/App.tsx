@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   Activity, AlertCircle, ArrowDownRight, ArrowUpRight, CheckCircle2,
   ChevronDown, CircleHelp, Clock3, Command, FileText, Gauge, RefreshCw,
@@ -30,6 +30,7 @@ function App() {
     productCD: "W",
     card6: "debit",
     email: "",
+    recipientEmail: "",
     topK: "3",
   });
 
@@ -66,7 +67,7 @@ function App() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  async function submitScore(event: React.FormEvent<HTMLFormElement>) {
+  async function submitScore(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setResult(null);
@@ -102,6 +103,7 @@ function App() {
           ProductCD: form.productCD || null,
           card6: form.card6 || null,
           P_emaildomain: form.email || null,
+          R_emaildomain: form.recipientEmail || null,
         },
         history,
         top_k: Number(form.topK),
@@ -201,7 +203,8 @@ function App() {
                 <label className="field"><span>Card type</span><select value={form.card6} onChange={(e) => update("card6", e.target.value)}><option value="">Not provided</option><option value="debit">Debit</option><option value="credit">Credit</option></select><ChevronDown className="select-chevron" size={14} /></label>
                 <label className="field"><span>Address 1 <em>optional</em></span><input type="number" value={form.addr1} onChange={(e) => update("addr1", e.target.value)} /></label>
                 <label className="field"><span>Address 2 <em>optional</em></span><input type="number" value={form.addr2} onChange={(e) => update("addr2", e.target.value)} /></label>
-                <label className="field full"><span>Payer email domain <em>optional</em></span><input placeholder="example.com" value={form.email} onChange={(e) => update("email", e.target.value)} /></label>
+                <label className="field"><span>Payer email domain <em>optional</em></span><input placeholder="example.com" value={form.email} onChange={(e) => update("email", e.target.value)} /></label>
+                <label className="field"><span>Recipient email domain <em>optional</em></span><input placeholder="example.com" value={form.recipientEmail} onChange={(e) => update("recipientEmail", e.target.value)} /></label>
               </div>
 
               <div className="form-section-title history-title">BEHAVIORAL CONTEXT <span>{historyCount} records</span></div>
