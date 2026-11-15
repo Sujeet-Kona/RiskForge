@@ -74,6 +74,17 @@ def upgrade() -> None:
         unique=False,
     )
 
+    # Preserve pre-existing REVIEW decisions by placing them into the new
+    # operational queue. The original decision rows remain unchanged.
+    op.execute(
+        """
+        INSERT INTO risk_review_cases (decision_id, status, created_at, updated_at)
+        SELECT id, 'PENDING', created_at, created_at
+        FROM risk_decisions
+        WHERE decision = 'REVIEW'
+        """
+    )
+
     op.create_table(
         "risk_review_events",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
