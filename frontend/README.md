@@ -36,9 +36,10 @@ The Vite development server proxies `/api` requests to the FastAPI service. Set
 - Keeps transaction history input explicit: the caller supplies strictly-prior
   history as JSON, matching the backend's point-in-time contract.
 
-Decision history and human-review navigation are intentionally marked as
-upcoming until their backend endpoints and persistence model are implemented.
-The dashboard does not fabricate transaction counts or sample risk decisions.
+Persisted decision history is read from the paginated audit endpoint. The
+human-review workflow remains planned until its case lifecycle, reviewer
+identity, authorization and append-only action history are implemented. The
+dashboard does not fabricate transaction counts or sample risk decisions.
 
 ## Production note
 
