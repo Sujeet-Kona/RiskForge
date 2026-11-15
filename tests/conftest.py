@@ -595,6 +595,7 @@ def audit_record():
         top_k=3,
         model_version="xgb-001",
         feature_version="behavioral-v1",
+        calibration_method="isotonic",
         policy_version="policy-001",
         feature_count=28,
         history_transactions_used=2,

@@ -91,6 +91,7 @@ def test_every_reported_value_is_the_value_that_was_recorded(
     assert record.policy_detail == body["policy_detail"]
     assert record.model_version == body["model_version"]
     assert record.feature_version == body["feature_version"]
+    assert record.calibration_method == body["calibration_method"]
     assert record.policy_version == body["policy_version"]
     assert record.feature_count == body["feature_count"]
     assert record.history_transactions_used == body["history_transactions_used"]
@@ -201,6 +202,7 @@ def test_decision_history_returns_newest_first_page_and_total(
     assert body["items"][0]["risk_probability"] == second["risk_probability"]
     assert body["items"][0]["model_version"] == "xgb-001"
     assert body["items"][0]["feature_version"] == "behavioral-v1"
+    assert body["items"][0]["calibration_method"] == "isotonic"
     assert body["items"][0]["policy_version"] == "policy-001"
     assert first["transaction_id"] != second["transaction_id"]
 

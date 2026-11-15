@@ -83,6 +83,7 @@ class AuditRecord:
     top_k: int
     model_version: str
     feature_version: str
+    calibration_method: str
     policy_version: str
     feature_count: int
     history_transactions_used: int
@@ -121,7 +122,12 @@ class AuditRecord:
 
         _require_text(self.decision_explanation, "decision_explanation")
 
-        for name in ("model_version", "feature_version", "policy_version"):
+        for name in (
+            "model_version",
+            "feature_version",
+            "calibration_method",
+            "policy_version",
+        ):
             _require_text(getattr(self, name), name)
 
         _require_count(self.top_k, "top_k", minimum=1)

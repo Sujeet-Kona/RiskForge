@@ -166,6 +166,7 @@ def create_app(
             status="ok",
             model_version=artifact.model_version,
             feature_version=artifact.feature_version,
+            calibration_method=artifact.calibration_method,
             policy_version=service.policy.config.policy_version,
             artifact=artifact.describe(),
             database=database,
@@ -408,6 +409,7 @@ def _review_case_out(case: ReviewCaseRecord) -> ReviewCaseOut:
         scored_inputs=decision.scored_inputs,
         model_version=decision.model_version,
         feature_version=decision.feature_version,
+        calibration_method=decision.calibration_method,
         policy_version=decision.policy_version,
     )
 

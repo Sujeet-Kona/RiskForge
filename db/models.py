@@ -84,6 +84,10 @@ class RiskDecision(Base):
             f"decision IN ({_DECISION_VALUES_SQL})",
             name="decision_is_a_policy_outcome",
         ),
+        CheckConstraint(
+            "calibration_method IN ('isotonic', 'sigmoid', 'unknown')",
+            name="calibration_method_is_supported",
+        ),
         CheckConstraint("feature_count > 0", name="feature_count_is_positive"),
         CheckConstraint(
             "history_transactions_used >= 0",
@@ -114,6 +118,7 @@ class RiskDecision(Base):
     top_k: Mapped[int] = mapped_column(Integer, nullable=False)
     model_version: Mapped[str] = mapped_column(String(32), nullable=False)
     feature_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    calibration_method: Mapped[str] = mapped_column(String(16), nullable=False)
     policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
     feature_count: Mapped[int] = mapped_column(Integer, nullable=False)
     history_transactions_used: Mapped[int] = mapped_column(Integer, nullable=False)

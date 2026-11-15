@@ -18,7 +18,7 @@ RiskForge uses the public IEEE-CIS Fraud Detection dataset to build point-in-tim
 | Model feature contract | 28 features: 13 behavioral, 4 categorical, 11 C/D |
 | Temporal partitions | 414,446 train / 88,013 validation / 88,081 test |
 | Selected estimator | XGBoost |
-| Calibration | Isotonic regression selected using forward-chaining validation |
+| Calibration | Isotonic regression selected using forward-chaining validation; method persisted with each decision |
 | Test Average Precision | 0.449254 raw / 0.438919 calibrated |
 | Test ROC-AUC | 0.865318 raw / 0.864850 calibrated |
 | Decision outputs | ALLOW / REVIEW / BLOCK |
@@ -65,6 +65,7 @@ flowchart TB
 
 - Offline feature generation and online scoring use the same behavioral feature implementation.
 - The API loads a frozen local artifact at startup; it does not train a fallback model during requests.
+- Each response and audit row records the artifact's calibration method alongside model, feature-contract, and policy identifiers.
 - Prior transaction history is supplied by the caller. PostgreSQL stores decisions but is not used as a feature-history store.
 - TreeSHAP model signals and policy-threshold explanations are separate outputs.
 - MLflow is used for offline experiment tracking only; it is not called in the inference path.

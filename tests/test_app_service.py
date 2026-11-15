@@ -65,6 +65,7 @@ def test_a_scored_transaction_returns_a_complete_assessment(serving_service, sco
     assert assessment.transaction_id == score_payload["transaction"]["TransactionID"]
     assert assessment.model_version == serving_service.artifact.model_version
     assert assessment.feature_version == serving_service.artifact.feature_version
+    assert assessment.calibration_method == serving_service.artifact.calibration_method
     assert assessment.history_transactions_used == len(score_payload["history"])
 
 
@@ -240,6 +241,7 @@ def test_the_response_carries_every_field_the_brief_requires(serving_service, sc
     assert response.decision == assessment.decision.value
     assert response.model_version == "xgb-001"
     assert response.feature_version == "behavioral-v1"
+    assert response.calibration_method == "isotonic"
     assert response.policy_version == "policy-001"
     assert response.feature_count == 28
     assert response.reason_codes != []

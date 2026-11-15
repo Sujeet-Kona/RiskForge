@@ -73,7 +73,7 @@ jobs:
           python -c '
           import sys
 
-          expected = "b7c4e9d2a610"
+          expected = "c6e2a9b4d781"
           current = sys.argv[1]
           if expected not in current.split():
               sys.exit(

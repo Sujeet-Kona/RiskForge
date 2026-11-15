@@ -72,6 +72,7 @@ def build_audit_record(
         top_k=request.top_k,
         model_version=response.model_version,
         feature_version=response.feature_version,
+        calibration_method=response.calibration_method,
         policy_version=response.policy_version,
         feature_count=response.feature_count,
         history_transactions_used=response.history_transactions_used,

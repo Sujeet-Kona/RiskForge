@@ -56,6 +56,7 @@ export interface ScoreResponse {
   policy_detail: { review_threshold: number; block_threshold: number };
   model_version: string;
   feature_version: string;
+  calibration_method: string;
   policy_version: string;
   feature_count: number;
   history_transactions_used: number;
@@ -83,6 +84,7 @@ export interface HealthResponse {
   status: "ok" | "unavailable";
   model_version?: string | null;
   feature_version?: string | null;
+  calibration_method?: string | null;
   policy_version?: string | null;
   database?: "ready" | "unavailable" | null;
   artifact?: Record<string, unknown> | null;

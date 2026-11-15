@@ -258,6 +258,11 @@ function App() {
             <div className="metric-caption">{health?.feature_version ?? "Version unavailable"}</div>
           </article>
           <article className="metric-card">
+            <div className="metric-top"><span>CALIBRATION</span><span className="metric-icon mint"><SlidersHorizontal size={17} /></span></div>
+            <div className="metric-value policy-value">{health?.calibration_method ?? "—"}</div>
+            <div className="metric-caption">Probability calibration method</div>
+          </article>
+          <article className="metric-card">
             <div className="metric-top"><span>DECISION POLICY</span><span className="metric-icon violet"><ShieldCheck size={17} /></span></div>
             <div className="metric-value policy-value">{health?.policy_version ?? "—"}</div>
             <div className="metric-caption">Calibrated probability thresholds</div>
@@ -327,7 +332,7 @@ function App() {
                   <div className="probability-track"><span className={decision?.className} style={{ width: `${probability ?? 0}%` }} /></div>
                   <div className="thresholds"><span>Review { (result.policy_detail.review_threshold * 100).toFixed(1) }%</span><span>Block { (result.policy_detail.block_threshold * 100).toFixed(1) }%</span></div>
                 </div>
-                <div className="result-meta"><div><span>MODEL</span><strong>{result.model_version}</strong></div><div><span>POLICY</span><strong>{result.policy_version}</strong></div><div><span>HISTORY USED</span><strong>{result.history_transactions_used}</strong></div></div>
+                <div className="result-meta"><div><span>MODEL</span><strong>{result.model_version}</strong></div><div><span>CALIBRATION</span><strong>{result.calibration_method}</strong></div><div><span>POLICY</span><strong>{result.policy_version}</strong></div><div><span>HISTORY USED</span><strong>{result.history_transactions_used}</strong></div></div>
                 <div className="signals-heading"><h3>Top model signals</h3><span>TreeSHAP · risk increasing</span></div>
                 {result.reason_codes.length ? result.reason_codes.map((item) => <div className="signal-row" key={item.code}><div><strong>{item.title}</strong><small>{item.feature}</small></div><span className="signal-value up"><ArrowUpRight size={13} /> {item.contribution.toFixed(3)}</span></div>) : <p className="muted-copy">No risk-increasing signals returned.</p>}
                 {result.risk_decreasing_signals.length > 0 && <><div className="signals-heading secondary-signals"><h3>Risk-reducing signals</h3></div>{result.risk_decreasing_signals.map((item) => <div className="signal-row" key={item.code}><div><strong>{item.title}</strong><small>{item.feature}</small></div><span className="signal-value down"><ArrowDownRight size={13} /> {item.contribution.toFixed(3)}</span></div>)}</>}
@@ -356,7 +361,7 @@ function App() {
                       <td><strong>{item.transaction_id}</strong><small>Audit #{item.id ?? "session"}</small></td>
                       <td><span className={`history-decision ${decisionMeta[item.decision].className}`}>{item.decision}</span></td>
                       <td className="history-probability">{(item.risk_probability * 100).toFixed(2)}%</td>
-                      <td><strong>{item.model_version}</strong><small>{item.policy_version} · {item.feature_version}</small></td>
+                      <td><strong>{item.model_version}</strong><small>{item.calibration_method} · {item.policy_version} · {item.feature_version}</small></td>
                       <td className="history-time">{item.created_at ? new Date(item.created_at).toLocaleString() : "Not timestamped"}</td>
                     </tr>
                   ))}
@@ -389,7 +394,7 @@ function App() {
                     <div className="review-risk"><strong>{(item.risk_probability * 100).toFixed(2)}%</strong><small>CALIBRATED RISK</small></div>
                   </div>
                   <div className="review-details">
-                    <div><span>MODEL / POLICY</span><strong>{item.model_version} · {item.policy_version}</strong><small>{item.feature_version} · {item.scored_inputs.ProductCD ? String(item.scored_inputs.ProductCD) : "Product not supplied"}</small></div>
+                    <div><span>MODEL / CALIBRATION / POLICY</span><strong>{item.model_version} · {item.calibration_method} · {item.policy_version}</strong><small>{item.feature_version} · {item.scored_inputs.ProductCD ? String(item.scored_inputs.ProductCD) : "Product not supplied"}</small></div>
                     <div><span>TRANSACTION AMOUNT</span><strong>{typeof item.scored_inputs.TransactionAmt === "number" ? `${item.scored_inputs.TransactionAmt.toFixed(2)}` : "Not supplied"}</strong><small>History rows used: recorded in audit decision</small></div>
                   </div>
                   <p className="review-explanation">{item.decision_explanation}</p>

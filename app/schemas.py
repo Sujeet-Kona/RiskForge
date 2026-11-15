@@ -204,6 +204,7 @@ class RiskScoreResponse(BaseModel):
     policy_detail: PolicyDetailOut
     model_version: str
     feature_version: str
+    calibration_method: str
     policy_version: str
     feature_count: int
     history_transactions_used: int
@@ -220,6 +221,7 @@ class AuditDecisionSummaryOut(BaseModel):
     decision: str
     model_version: str
     feature_version: str
+    calibration_method: str
     policy_version: str
     created_at: datetime | None = None
 
@@ -250,6 +252,7 @@ class HealthResponse(BaseModel):
     status: str
     model_version: str | None = None
     feature_version: str | None = None
+    calibration_method: str | None = None
     policy_version: str | None = None
     artifact: dict | None = None
     database: str | None = None
@@ -305,6 +308,7 @@ class ReviewCaseOut(BaseModel):
     scored_inputs: dict
     model_version: str
     feature_version: str
+    calibration_method: str
     policy_version: str
 
 
