@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Barrier
 
 import pytest
@@ -24,6 +24,7 @@ from db.models import (
     RiskDecision,
     RiskReviewEvent,
     RiskIdempotencyRecord,
+    RiskReviewCase,
 )
 from db.repository import (
     AUDIT_RECORD_FIELDS,
@@ -446,8 +447,6 @@ def test_a_resolved_review_case_cannot_return_to_pending(
         comment=None,
     )
 
-    from db.models import RiskReviewCase
-
     with pytest.raises(DBAPIError):
         with audit_repository.database.session_factory() as session:
             case = session.get(RiskReviewCase, case_id)
@@ -626,3 +625,94 @@ def test_concurrent_different_payloads_for_one_key_have_one_winner(
     assert decision_count == 1
     assert review_count == 1
     assert idempotency_count == 1
+
+
+
+def test_review_case_identity_cannot_be_changed_during_resolution(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            case = session.get(RiskReviewCase, case_id)
+            case.id = case_id + 100
+            case.status = "APPROVED"
+            case.updated_at = datetime.now(timezone.utc)
+            case.resolved_at = case.updated_at
+            case.resolved_by = "reviewer-01"
+            session.commit()
+
+
+def test_review_case_rejects_inconsistent_resolution_timestamps(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            case = session.get(RiskReviewCase, case_id)
+            invalid_time = case.created_at - timedelta(seconds=1)
+            case.status = "APPROVED"
+            case.updated_at = invalid_time
+            case.resolved_at = invalid_time
+            case.resolved_by = "reviewer-01"
+            session.commit()
+
+
+def test_review_case_rejects_blank_reviewer_identity_at_database_boundary(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+
+            case = session.get(RiskReviewCase, case_id)
+            resolved_at = datetime.now(timezone.utc)
+            case.status = "REJECTED"
+            case.updated_at = resolved_at
+            case.resolved_at = resolved_at
+            case.resolved_by = "   "
+            session.commit()
+
+
+
+def test_pending_review_case_cannot_be_deleted(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            case = session.get(RiskReviewCase, case_id)
+            session.delete(case)
+            session.commit()

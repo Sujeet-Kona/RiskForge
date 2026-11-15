@@ -8,7 +8,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -73,7 +72,7 @@ jobs:
           python -c '
           import sys
 
-          expected = "c6e2a9b4d781"
+          expected = "d8f4b2c6a901"
           current = sys.argv[1]
           if expected not in current.split():
               sys.exit(

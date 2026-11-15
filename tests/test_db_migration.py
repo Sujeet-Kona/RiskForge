@@ -115,6 +115,7 @@ def test_postgres_enforces_append_only_decision_and_review_event_tables(audit_da
                     "('trg_risk_decisions_append_only', "
                     "'trg_risk_review_events_append_only', "
                     "'trg_risk_review_cases_one_way', "
+                    "'trg_risk_review_cases_no_delete', "
                     "'trg_risk_idempotency_records_append_only')"
                 )
             ).scalars()
@@ -124,6 +125,7 @@ def test_postgres_enforces_append_only_decision_and_review_event_tables(audit_da
         "trg_risk_decisions_append_only",
         "trg_risk_review_events_append_only",
         "trg_risk_review_cases_one_way",
+        "trg_risk_review_cases_no_delete",
         "trg_risk_idempotency_records_append_only",
     }
 
