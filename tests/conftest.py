@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
+from datetime import datetime, timezone
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,6 +13,7 @@ import pytest
 from sklearn.pipeline import Pipeline
 
 from db.config import DATABASE_URL_ENVIRONMENT_VARIABLE, DEFAULT_DATABASE_URL
+from db.repository import ReviewCaseRecord, ReviewConflictError
 from ml.data.modeling import (
     CD_FEATURES,
     MODEL_FEATURES,
@@ -342,11 +345,15 @@ class InMemoryAuditStore:
 
     def __init__(self) -> None:
         self.records: list = []
+        self.review_cases: list[ReviewCaseRecord] = []
+        self.review_events: list[dict] = []
         self.failure: Exception | None = None
         self.ready: bool = True
 
     def reset(self) -> None:
         self.records = []
+        self.review_cases = []
+        self.review_events = []
         self.failure = None
         self.ready = True
 
@@ -355,8 +362,24 @@ class InMemoryAuditStore:
             raise self.failure
 
         self.records.append(record)
+        decision_id = len(self.records)
+        if record.decision == "REVIEW":
+            now = datetime.now(timezone.utc)
+            self.review_cases.append(
+                ReviewCaseRecord(
+                    id=len(self.review_cases) + 1,
+                    decision_id=decision_id,
+                    status="PENDING",
+                    created_at=now,
+                    updated_at=now,
+                    resolved_at=None,
+                    resolved_by=None,
+                    resolution_comment=None,
+                    decision=record,
+                )
+            )
 
-        return len(self.records)
+        return decision_id
 
     def get_audit_record(self, decision_id: int):
         if self.failure is not None:
@@ -379,6 +402,52 @@ class InMemoryAuditStore:
             if decision is None or record.decision == decision
         ]
         return matches[offset : offset + limit], len(matches)
+
+    def list_review_cases(
+        self, *, status: str | None, limit: int, offset: int
+    ):
+        if self.failure is not None:
+            raise self.failure
+        matches = [
+            case
+            for case in reversed(self.review_cases)
+            if status is None or case.status == status
+        ]
+        return matches[offset : offset + limit], len(matches)
+
+    def resolve_review_case(
+        self, *, case_id: int, outcome: str, reviewer_id: str, comment: str | None
+    ):
+        if self.failure is not None:
+            raise self.failure
+        for index, case in enumerate(self.review_cases):
+            if case.id != case_id:
+                continue
+            if case.status != "PENDING":
+                raise ReviewConflictError(
+                    f"Review case {case_id} has already been resolved."
+                )
+            now = datetime.now(timezone.utc)
+            updated = replace(
+                case,
+                status=outcome,
+                updated_at=now,
+                resolved_at=now,
+                resolved_by=reviewer_id,
+                resolution_comment=comment,
+            )
+            self.review_cases[index] = updated
+            self.review_events.append(
+                {
+                    "case_id": case_id,
+                    "action": outcome,
+                    "reviewer_id": reviewer_id,
+                    "comment": comment,
+                    "created_at": now,
+                }
+            )
+            return updated
+        return None
 
     def is_ready(self) -> bool:
         return self.ready
