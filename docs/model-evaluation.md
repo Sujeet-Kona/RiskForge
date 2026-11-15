@@ -52,9 +52,9 @@ On TEST, raw versus calibrated XGBoost results were:
 | --- | ---: | ---: |
 | Average Precision | 0.449254 | 0.438919 |
 | ROC-AUC | 0.865318 | 0.864850 |
-| Brier score | — | 0.024204 |
-| Log loss | — | 0.102851 |
-| ECE | — | 0.003553 |
+| Brier score | 0.101228 | 0.024204 |
+| Log loss | 0.344462 | 0.102851 |
+| ECE (10 bins) | 0.222200 | 0.003553 |
 
 Calibration targets probability reliability, not ranking. Isotonic's stepwise mapping can create tied probabilities and slightly change ranking metrics.
 
