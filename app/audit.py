@@ -86,3 +86,22 @@ def record_decision(
         return store.create_audit_record(build_audit_record(request, response))
     except AuditPersistenceError as error:
         raise AuditUnavailableError from error
+
+
+
+def list_decisions(
+    store: AuditStore,
+    *,
+    limit: int,
+    offset: int,
+    decision: str | None = None,
+):
+    """Read a bounded decision-history page without exposing persistence details."""
+    try:
+        return store.list_audit_records(
+            limit=limit,
+            offset=offset,
+            decision=decision,
+        )
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
