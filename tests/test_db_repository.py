@@ -447,8 +447,6 @@ def test_a_resolved_review_case_cannot_return_to_pending(
         comment=None,
     )
 
-    from db.models import RiskReviewCase
-
     with pytest.raises(DBAPIError):
         with audit_repository.database.session_factory() as session:
             case = session.get(RiskReviewCase, case_id)
@@ -690,7 +688,6 @@ def test_review_case_rejects_blank_reviewer_identity_at_database_boundary(
 
     with pytest.raises(DBAPIError):
         with audit_repository.database.session_factory() as session:
-            from db.models import RiskReviewCase
 
             case = session.get(RiskReviewCase, case_id)
             resolved_at = datetime.now(timezone.utc)
