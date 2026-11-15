@@ -20,12 +20,15 @@ decision that cannot be recorded is not returned — see :mod:`app.audit`.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import re
 from typing import Literal
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.audit import (
@@ -33,6 +36,8 @@ from app.audit import (
     AuditUnavailableError,
     list_decisions,
     list_review_cases,
+    get_idempotency_response,
+    record_idempotent_decision,
     record_decision,
     resolve_review_case,
 )
@@ -62,6 +67,7 @@ from app.schemas import (
 from app.service import RiskScoringService, to_response
 from db.repository import (
     AuditStore,
+    IdempotencyConflictError,
     ReviewCaseNotFoundError,
     ReviewCaseRecord,
     ReviewConflictError,
@@ -168,6 +174,12 @@ def create_app(
     @application.post(SCORE_ROUTE, response_model=RiskScoreResponse)
     def score(
         payload: RiskScoreRequest,
+        idempotency_key: str | None = Header(
+            default=None,
+            alias="Idempotency-Key",
+            min_length=8,
+            max_length=128,
+        ),
         service: RiskScoringService = Depends(get_service),
         audit: AuditStore = Depends(get_audit_store),
     ) -> RiskScoreResponse:
@@ -177,7 +189,51 @@ def create_app(
         is returned, and it cannot change that decision: nothing on the audit path
         is an input to the model, the calibration or the policy.
         """
+        request_hash: str | None = None
+        if idempotency_key is not None:
+            if re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", idempotency_key) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Idempotency-Key may contain only letters, digits, '.', '_', ':', and '-'.",
+                )
+            canonical_request = json.dumps(
+                payload.model_dump(mode="json"),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+            try:
+                cached = get_idempotency_response(
+                    audit,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                )
+            except IdempotencyConflictError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key was already used for a different request.",
+                ) from error
+            if cached is not None:
+                return RiskScoreResponse.model_validate(cached)
+
         response = to_response(service.score(payload))
+
+        if idempotency_key is not None and request_hash is not None:
+            try:
+                stored = record_idempotent_decision(
+                    audit,
+                    payload,
+                    response,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                )
+            except IdempotencyConflictError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key was already used for a different request.",
+                ) from error
+            return RiskScoreResponse.model_validate(stored)
 
         record_decision(audit, payload, response)
 
