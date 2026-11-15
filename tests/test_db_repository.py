@@ -21,6 +21,7 @@ from db.models import (
     AUDIT_TABLE_NAME,
     RiskDecision,
     RiskReviewEvent,
+    RiskIdempotencyRecord,
 )
 from db.repository import (
     AUDIT_RECORD_FIELDS,
@@ -28,6 +29,7 @@ from db.repository import (
     AuditRecord,
     AuditRepository,
     ReviewConflictError,
+    IdempotencyConflictError,
 )
 from db.session import AuditDatabase
 
@@ -450,4 +452,76 @@ def test_a_resolved_review_case_cannot_return_to_pending(
             case.status = "PENDING"
             case.resolved_at = None
             case.resolved_by = None
+            session.commit()
+
+
+
+def test_idempotency_replay_returns_the_original_response_without_a_second_row(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+    audit_database: AuditDatabase,
+):
+    first = audit_repository.create_idempotent_decision(
+        audit_record,
+        idempotency_key="riskforge-repo-key-0001",
+        request_hash="a" * 64,
+        response_body={"decision": "REVIEW", "risk_probability": 0.09},
+    )
+    replay = audit_repository.create_idempotent_decision(
+        audit_record,
+        idempotency_key="riskforge-repo-key-0001",
+        request_hash="a" * 64,
+        response_body={"decision": "REVIEW", "risk_probability": 0.09},
+    )
+
+    assert replay == first
+    assert audit_repository.get_idempotency_record("riskforge-repo-key-0001") == (
+        "a" * 64,
+        first,
+    )
+    with audit_database.engine.connect() as connection:
+        count = connection.execute(
+            text(f"SELECT COUNT(*) FROM {AUDIT_TABLE_NAME}")
+        ).scalar_one()
+    assert count == 1
+
+
+def test_idempotency_key_reuse_with_a_different_hash_conflicts(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_idempotent_decision(
+        audit_record,
+        idempotency_key="riskforge-repo-key-0002",
+        request_hash="a" * 64,
+        response_body={"decision": "REVIEW"},
+    )
+
+    with pytest.raises(IdempotencyConflictError):
+        audit_repository.create_idempotent_decision(
+            audit_record,
+            idempotency_key="riskforge-repo-key-0002",
+            request_hash="b" * 64,
+            response_body={"decision": "BLOCK"},
+        )
+
+
+def test_idempotency_records_are_database_enforced_append_only(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_idempotent_decision(
+        audit_record,
+        idempotency_key="riskforge-repo-key-0003",
+        request_hash="c" * 64,
+        response_body={"decision": "REVIEW"},
+    )
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            stored = session.get(
+                RiskIdempotencyRecord,
+                "riskforge-repo-key-0003",
+            )
+            stored.response_body = {"decision": "BLOCK"}
             session.commit()
