@@ -5,10 +5,10 @@
 **VERIFIED:** the current local backend, database, serving-parity and frontend
 checks listed below, and dashboard acceptance of one APPROVE and one REJECT
 manual-review case (see [manual-review dashboard acceptance](#manual-review-dashboard-acceptance-2026-11-16)).
-**USER ACTION REQUIRED:** human review and dependency-ordered integration of the
-PR stack. This is not a declaration that the whole PR stack has shipped or that
-the prototype is production-ready. The completion branch was later pushed and
-opened as draft PR #14; nothing has been merged.
+PRs #10–#13 were merged into `main` in dependency order on 2026-11-16, with this
+completion branch (PR #14) as the final step (see [GitHub integration](#github-integration)).
+No independent human code review approval is recorded on those PRs. This is not
+a declaration that the prototype is production-ready.
 
 Work was isolated on `hardening/riskforge-completion`, based on the existing PR
 stack, with PR #11's required fix merged into the stack tip. Final checks covered
@@ -226,9 +226,9 @@ savings, live transaction volume, production compliance or bank-performance clai
 is supported. Python dependency vulnerability scanning was not run; `npm audit`
 does not establish whole-system security.
 
-## Read-only GitHub inspection and safe integration
+## GitHub integration
 
-Snapshot inspected on 2026-11-15; recheck immediately before any future action.
+Pre-integration snapshot inspected on 2026-11-15:
 
 | PR | Base → head | Head SHA | State / mergeability / checks |
 | --- | --- | --- | --- |
@@ -243,7 +243,7 @@ The original checkout remains on its original local branch/commit with its user
 changes intact. A previously authorized push attempt was rejected with HTTP 403
 for account `sandy-455`; no fork/remote/authentication setting was changed. The
 completion branch was later pushed to `origin/hardening/riskforge-completion` and
-opened as draft PR #14 against #13's branch.
+opened as draft PR #14 against #13's branch (retargeted to `main` after #13 merged).
 
 Existing remote `main` at `37883498801fb998f1d35d6c8ec7d2e20b6cf271` has a successful
 historical CI run from 2026-11-07. That is **not CI for this local work**. CI now
@@ -251,11 +251,26 @@ also installs the frontend with `npm ci` and runs Vitest before the type-check a
 production build. Run `43753200454` on PR #14 head `a33d55e` passed with 1,256
 pytest tests and 60 Vitest tests.
 
-Safe future sequence, only when authorized: recheck heads/bases/checks; integrate
-#10 → #11 → #12 → #13 in dependency order, verifying the next base and checks
-after each step without rewriting branches; then review the completion-branch
-difference against the integrated result and run CI for that exact tree. No
-merge, close, approval, push or repository-setting change was performed here.
+With the repository owner's authorization, the stack was merged into `main` in
+dependency order on 2026-11-16 using merge commits, without rewriting any branch.
+`main` has no branch protection or required-review rule; no independent human
+review approval is recorded. Before each merge, the PR was retargeted to `main`
+and its head, mergeability and checks were rechecked. #11, #12 and #13 were
+closed and reopened once each solely to trigger CI against `main`, because a
+base change alone does not start a workflow run.
+
+| PR | Head | CI run against `main` | Merge commit |
+| --- | --- | --- | --- |
+| #10 | `858f0ee` | `43719866756`: 1,240 pytest, build passed | `bff1064` |
+| #11 | `42ecf4e` | `43758507596`: 1,240 pytest, build passed | `1867b8a` |
+| #12 | `9a6883e` | `43758787381`: 1,242 pytest, build passed | `3f9f98a` |
+| #13 | `0fc037a` | `43759050635`: 1,246 pytest, migration `d8f4b2c6a901`, build passed | `13843b0` |
+
+Push CI on `main` after each of these four merges also passed (after #13:
+run `43759265509` on `13843b0`, 1,246 pytest). PR #14,
+which carries this completion branch, is the final step; its merge commit and
+the resulting `main` CI run are recorded on GitHub, not in this file, because
+this file is committed before that merge.
 
 ## Evidence locations and local acceptance
 
@@ -276,8 +291,9 @@ cover local usage and database safety.
 - [x] Browser scoring/review workflow and disposable DB persistence inspected.
 - [x] Historical metrics distinguished from fresh engineering checks.
 - [x] Manual-review dashboard acceptance: case #2 APPROVE and case #3 REJECT; both original decisions remain REVIEW.
-- [x] Completion branch pushed and opened as draft PR #14; CI includes frontend Vitest.
-- [ ] **USER ACTION REQUIRED:** human review of the PR stack, then integrate it in dependency order and verify CI on the integrated main tree.
+- [x] Completion branch pushed as PR #14; CI includes frontend Vitest.
+- [x] PRs #10–#13 merged into `main` in dependency order with passing CI against `main`.
+- [ ] **NOT PERFORMED:** independent human code review of the PR stack.
 - [ ] **NOT IMPLEMENTED:** committed unattended browser-E2E suite.
 
 The API/PostgreSQL integration tests, component tests and browser walkthrough are
