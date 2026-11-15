@@ -132,13 +132,18 @@ function App() {
   }, []);
 
   const apiReady = health?.status === "ok" && health.database === "ready";
+  const systemStatusLabel = health?.status !== "ok"
+    ? "API unavailable"
+    : health.database !== "ready"
+      ? "Audit store unavailable"
+      : "Scoring ready";
   const probability = result ? result.risk_probability * 100 : null;
   const decision = result ? decisionMeta[result.decision] : null;
   const ResultIcon = decision?.icon;
 
   const historyCount = useMemo(() => {
     try {
-      const parsed = JSON.parse(historyText) as unknown;
+      const parsed = JSON.parse(historyText.trim() || "[]") as unknown;
       return Array.isArray(parsed) ? parsed.length : 0;
     } catch {
       return 0;
@@ -157,7 +162,7 @@ function App() {
 
     let history: HistoryTransaction[];
     try {
-      const parsed: unknown = JSON.parse(historyText);
+      const parsed: unknown = JSON.parse(historyText.trim() || "[]");
       if (!Array.isArray(parsed)) throw new Error("History must be a JSON array.");
       history = parsed as HistoryTransaction[];
     } catch (err) {
@@ -192,7 +197,8 @@ function App() {
         top_k: Number(form.topK),
       }, idempotencyKey);
       setResult(response);
-      setIdempotencyKey(crypto.randomUUID());
+      // Keep this key for retries of the exact same form payload. Editing any
+      // field rotates it in update(), so a changed request gets a fresh key.
       void refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scoring request failed.");
@@ -230,7 +236,7 @@ function App() {
           <div className="breadcrumb"><span>Workspace</span><span className="slash">/</span><strong>Overview</strong></div>
           <div className="topbar-actions">
             <div className={`system-status ${apiReady ? "online" : "offline"}`}>
-              <span className="status-dot" /> {apiReady ? "API operational" : "API unavailable"}
+              <span className="status-dot" /> {systemStatusLabel}
             </div>
             <button className="icon-button" type="button" onClick={() => void refreshHealth()} aria-label="Refresh API status"><RefreshCw size={16} /></button>
             <div className="avatar">RF</div>
