@@ -24,12 +24,13 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.audit import (
     AUDIT_UNAVAILABLE_MESSAGE,
     AuditUnavailableError,
+    list_decisions,
     record_decision,
 )
 from app.config import DEFAULT_ARTIFACT_PATH, HISTORY_NOTE
@@ -42,6 +43,8 @@ from app.dependencies import (
     release_resources,
 )
 from app.schemas import (
+    AuditDecisionListResponse,
+    AuditDecisionSummaryOut,
     ErrorOut,
     ErrorResponse,
     HealthResponse,
@@ -50,6 +53,7 @@ from app.schemas import (
 )
 from app.service import RiskScoringService, to_response
 from db.repository import AuditStore
+from policy.decision import Decision
 
 
 logger = logging.getLogger("riskforge.serving")
@@ -59,6 +63,7 @@ API_VERSION = "phase-7"
 
 HEALTH_ROUTE = "/health"
 SCORE_ROUTE = "/v1/risk/score"
+AUDIT_ROUTE = "/v1/audit/decisions"
 
 DATABASE_READY = "ready"
 DATABASE_UNAVAILABLE = "unavailable"
@@ -164,6 +169,39 @@ def create_app(
         record_decision(audit, payload, response)
 
         return response
+
+    @application.get(AUDIT_ROUTE, response_model=AuditDecisionListResponse)
+    def decision_history(
+        limit: int = Query(default=25, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        decision: Decision | None = None,
+        audit: AuditStore = Depends(get_audit_store),
+    ) -> AuditDecisionListResponse:
+        """Return a bounded, newest-first page of recorded decisions."""
+        records, total = list_decisions(
+            audit,
+            limit=limit,
+            offset=offset,
+            decision=None if decision is None else decision.value,
+        )
+        return AuditDecisionListResponse(
+            items=[
+                AuditDecisionSummaryOut(
+                    id=record.id,
+                    transaction_id=record.transaction_id,
+                    risk_probability=record.risk_probability,
+                    decision=record.decision,
+                    model_version=record.model_version,
+                    feature_version=record.feature_version,
+                    policy_version=record.policy_version,
+                    created_at=record.created_at,
+                )
+                for record in records
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     @application.exception_handler(ArtifactUnavailableError)
     async def artifact_unavailable(
