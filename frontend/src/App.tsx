@@ -4,8 +4,8 @@ import {
   ChevronDown, CircleHelp, Clock3, Command, FileText, Gauge, RefreshCw,
   Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Sparkles, Wallet,
 } from "lucide-react";
-import { getHealth, scoreTransaction } from "./api";
-import type { Decision, HealthResponse, HistoryTransaction, ScoreResponse } from "./types";
+import { getDecisionHistory, getHealth, scoreTransaction } from "./api";
+import type { AuditDecisionSummary, Decision, HealthResponse, HistoryTransaction, ScoreResponse } from "./types";
 
 const decisionMeta: Record<Decision, { label: string; className: string; icon: typeof ShieldCheck }> = {
   ALLOW: { label: "Allow", className: "allow", icon: ShieldCheck },
@@ -16,6 +16,9 @@ const decisionMeta: Record<Decision, { label: string; className: string; icon: t
 function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState("");
+  const [historyRows, setHistoryRows] = useState<AuditDecisionSummary[]>([]);
+  const [historyError, setHistoryError] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScoreResponse | null>(null);
   const [error, setError] = useState("");
@@ -45,8 +48,22 @@ function App() {
     }
   }
 
+  async function refreshHistory() {
+    setHistoryLoading(true);
+    try {
+      const page = await getDecisionHistory();
+      setHistoryRows(page.items);
+      setHistoryError("");
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "Could not load decision history");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
   useEffect(() => {
     void refreshHealth();
+    void refreshHistory();
   }, []);
 
   const apiReady = health?.status === "ok" && health.database === "ready";
@@ -109,6 +126,7 @@ function App() {
         top_k: Number(form.topK),
       });
       setResult(response);
+      void refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scoring request failed.");
     } finally {
@@ -128,7 +146,7 @@ function App() {
         <nav className="nav-list" aria-label="Main navigation">
           <a className="nav-item active" href="#overview"><Gauge size={17} /> Overview</a>
           <a className="nav-item" href="#score"><Activity size={17} /> Transaction scoring</a>
-          <a className="nav-item disabled" href="#activity" aria-disabled="true"><FileText size={17} /> Decision history <span className="soon">NEXT</span></a>
+          <a className="nav-item" href="#activity"><FileText size={17} /> Decision history</a>
           <a className="nav-item disabled" href="#review" aria-disabled="true"><ShieldAlert size={17} /> Review queue <span className="soon">NEXT</span></a>
         </nav>
         <div className="sidebar-bottom">
@@ -252,6 +270,34 @@ function App() {
             )}
           </section>
         </div>
+
+        <section className="panel history-panel" id="activity">
+          <div className="panel-heading history-heading">
+            <div><div className="section-kicker">AUDIT TRAIL</div><h2>Recent decisions</h2><p>Persisted scoring outcomes returned by the PostgreSQL audit store.</p></div>
+            <button className="icon-button" type="button" onClick={() => void refreshHistory()} aria-label="Refresh decision history" disabled={historyLoading}><RefreshCw size={15} /></button>
+          </div>
+          {historyError && <div className="notice warning"><AlertCircle size={16} /><span>{historyError}</span></div>}
+          {historyRows.length === 0 ? (
+            <div className="history-empty">{historyLoading ? "Loading recorded decisions…" : "No persisted decisions yet. Score a transaction to create the first audit record."}</div>
+          ) : (
+            <div className="history-table-wrap">
+              <table className="history-table">
+                <thead><tr><th>TRANSACTION</th><th>OUTCOME</th><th>RISK</th><th>MODEL / POLICY</th><th>RECORDED</th></tr></thead>
+                <tbody>
+                  {historyRows.map((item) => (
+                    <tr key={item.id ?? item.transaction_id}>
+                      <td><strong>{item.transaction_id}</strong><small>Audit #{item.id ?? "session"}</small></td>
+                      <td><span className={`history-decision ${decisionMeta[item.decision].className}`}>{item.decision}</span></td>
+                      <td className="history-probability">{(item.risk_probability * 100).toFixed(2)}%</td>
+                      <td><strong>{item.model_version}</strong><small>{item.policy_version} · {item.feature_version}</small></td>
+                      <td className="history-time">{item.created_at ? new Date(item.created_at).toLocaleString() : "Not timestamped"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
 
         <footer className="footer"><span>RiskForge <b>·</b> Fraud detection &amp; risk decisioning</span><span>Research prototype · Not connected to a live payment network</span></footer>
       </main>
