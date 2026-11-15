@@ -10,7 +10,7 @@ RiskForge was evaluated on the IEEE-CIS Fraud Detection dataset (590,540 transac
 | VALIDATION | 88,013 | 3,010 |
 | TEST | 88,081 | 3,065 |
 
-Preprocessing and estimators are fitted on TRAIN. Model comparison, calibration selection, and policy research use VALIDATION. TEST is reserved for final reporting.
+Preprocessing and estimators are fitted on TRAIN. Model comparison, calibration selection, and policy research use VALIDATION. TEST is reserved for final reporting. VALIDATION is therefore a **selection** partition, not an independent estimate — see [Reuse of the VALIDATION partition](#reuse-of-the-validation-partition).
 
 ## Model comparison
 
@@ -158,6 +158,52 @@ and the Git commit (when run inside a Git checkout) into
 `run_metadata.json`. The committed metadata predates this addition and will
 gain those fields when the benchmark is next rerun with the local IEEE-CIS
 inputs. This does not package or redistribute the dataset.
+
+## Reuse of the VALIDATION partition
+
+VALIDATION was consulted repeatedly during development, and each consultation
+made a decision that changed what was subsequently measured on it:
+
+| Decision taken on VALIDATION | Where | Effect on VALIDATION scores |
+| --- | --- | --- |
+| Drop `D5` from the 28-feature contract | `ml/data/modeling.py:35-37` | feature set chosen to raise VALIDATION PR-AUC |
+| Choose isotonic over sigmoid calibration | `scripts/evaluate_calibration.py`, forward-chaining OOF | calibrator chosen to lower OOF Brier score |
+| Search the review/block threshold grid | `scripts/select_decision_policy.py` | thresholds chosen to minimize VALIDATION expected cost |
+| Rank XGBoost against Random Forest and Logistic Regression | `scripts/run_model_benchmark.py` | estimator chosen on the same partition |
+
+The consequence is that **VALIDATION PR-AUC is not an independent estimate of
+generalization.** It is a score on the data that selected the features, the
+calibrator, the estimator and the thresholds. Repeated selection on one finite
+partition biases that score upward, and nothing in this repository quantifies
+the bias: there is no nested cross-validation and no separate selection
+partition, so the optimistic component cannot be separated from the real one.
+
+The clearest instance is the `D5` removal, which was accepted because VALIDATION
+PR-AUC moved from 0.471864 to 0.474352 (+0.002488). Some of that gain is real
+and some is selection noise on the same 88,013 rows. The repository records the
+decision and its measured effect; it does not claim to know the split between
+the two.
+
+TEST is the only partition that no selection decision consulted. Its labels are
+withheld until the final reporting step (`scripts/select_decision_policy.py:163`
+skips TEST when labels are summarized, and the first TEST label read is
+`test_labels = split.test[TARGET_COLUMN]` at line 419 — after the winning
+thresholds have already been printed at lines 411-412). Lines 481-483 then abort
+if the thresholds differ from those pre-TEST values. **The TEST figures are the
+ones to quote.** The VALIDATION figure belongs in the record of how the model was
+built, not in a claim about how well it performs.
+
+The walk-forward experiment in [temporal evaluation](temporal_evaluation.md) is
+not a remedy for this. It retrains over expanding windows that overlap both
+VALIDATION and TEST, so it reuses the same rows a second time rather than
+providing a fresh partition. Its non-comparability with the locked benchmark is
+documented in `README.md`.
+
+Correcting this properly would mean a fourth partition or nested
+cross-validation for selection. Neither is implemented, and neither can be
+retrofitted without re-running feature and threshold selection — which would
+change the frozen model and invalidate every locked number above. It is recorded
+here as a known limitation of the evidence, not as a pending fix.
 
 ## Interpretation limits
 

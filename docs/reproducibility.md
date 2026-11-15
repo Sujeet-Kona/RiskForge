@@ -156,6 +156,70 @@ is not a fresh model-training or benchmark reproduction.
   not retroactively available in the currently committed metadata.
 - The offline/API parity evidence covers three selected validation cases only.
 
+## Seeding, threads, and what "reproducible" means here
+
+Every source of randomness in the pipeline takes an explicit seed at the point
+of use. There is no process-wide seeding anywhere in the repository: no
+`np.random.seed`, no `random.seed`, and no `PYTHONHASHSEED` setting.
+
+| Source of randomness | Fixed value | Where | What it controls |
+| --- | --- | --- | --- |
+| XGBoost sampling | `random_state=42` | `ml/models/xgboost_model.py:85` | `subsample=0.8` and `colsample_bytree=0.8` on the locked model |
+| Benchmark bootstrap | `np.random.default_rng(20261104)` | `scripts/run_model_benchmark.py:47,266` | 500 paired resamples; the seed is also written into `run_metadata.json` |
+| Temporal bootstrap | `np.random.default_rng(20261107)` | `scripts/run_temporal_evaluation.py:38,162` | 500 moving-time-block resamples; also written into `run_metadata.json` |
+| RandomForest comparison | `random_state=42` | `scripts/run_model_benchmark.py:128` | benchmark-only candidate, never served |
+| LogisticRegression baseline | `random_state=42` | `ml/models/logistic_baseline.py:65` | baseline candidate, never served |
+| `sigmoid` calibrator | `random_state=42` | `ml/models/calibration.py:101` | the **non**-locked calibration method |
+
+Three things in the locked path consume no randomness at all, which is worth
+stating because it narrows what a rerun can legitimately differ on:
+
+- The chronological split (`ml/split/temporal.py`) selects boundaries from
+  distinct `TransactionDT` values. It contains no RNG call.
+- The locked calibrator is `IsotonicRegression` (`ml/models/calibration.py:104`),
+  fitted by the deterministic PAVA algorithm.
+- The behavioral features are built by a single ordered pass over
+  `TransactionDT`, with no sampling.
+
+All Python packages are `==`-pinned in `requirements.txt`, and the pinned
+versions match the environment the committed reports were produced in
+(`pandas 3.1.0`, `numpy 2.5.4`, `scikit-learn 1.9.1`, `scipy 1.18.1`,
+`xgboost 3.4.1`).
+
+### The one execution setting that is deliberately not pinned
+
+`n_jobs=-1` at `ml/models/xgboost_model.py:86` and
+`scripts/run_model_benchmark.py:129` resolves to the local core count, so the
+thread count of a rerun is a property of the machine rather than of the
+repository.
+
+This is not an oversight that can be quietly corrected. Fixing `n_jobs` to a
+specific number would change the thread count used to build the histogram
+gradients, and XGBoost does not guarantee bit-identical trees across thread
+counts. The locked benchmark, the locked calibrator, the frozen
+`scale_pos_weight`, and the frozen serving artifact were all produced with
+`n_jobs=-1` on the original machine. Pinning threads now would risk producing a
+*model* that no longer matches the frozen metrics — which is a far worse outcome
+than an unpinned thread count, because the frozen numbers are the project's
+evidence.
+
+What the repository does instead is **fail loudly on drift** rather than
+guarantee identical floats:
+
+| Guard | Tolerance | Where | Refuses to continue when |
+| --- | --- | --- | --- |
+| Locked VALIDATION/TEST PR-AUC and ROC-AUC | `1e-6` | `scripts/train_tracked_model.py:42-46,107` | a tracked rerun is not the locked model |
+| Locked raw and calibrated TEST PR-AUC and ROC-AUC | `1e-5` | `scripts/select_decision_policy.py:51-54,448` | the Phase 3 baseline moved |
+| Locked `scale_pos_weight` | `1e-6` | `scripts/build_serving_artifact.py:62,110` | the class weighting moved |
+
+So the honest claim is: **reproduction is asserted, not promised.** On the
+pinned stack and the same source data the pipeline is expected to reproduce the
+locked figures, and if it does not, the scripts above abort with the observed
+and expected values printed instead of writing a report that silently disagrees
+with the committed one. A rerun on a machine with a different core count, a
+different BLAS, or a different OS is not covered by any evidence in this
+repository.
+
 ## What a clean clone contains
 
 `.gitignore` excludes the dataset, generated features, the fitted serving
@@ -181,7 +245,7 @@ Two consequences worth stating plainly:
 - **The test suite does not need the dataset or the artifact.** The fixtures
   build a synthetic 600-row modeling frame through the real
   `build_modeling_frame` and the real preprocessor (`tests/conftest.py:46-56`),
-  so all 1,246 tests — including the serving-discipline, explainability,
+  so the full suite — including the serving-discipline, explainability,
   parity, migration, and concurrency suites — run and pass on a clean clone with
   only a PostgreSQL server available. This is why CI is green without IEEE-CIS.
 - **Serving does need them.** `app/dependencies.py:80-109` fails closed when
