@@ -10,16 +10,7 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
-/** Flatten FastAPI's 422 body, which is the one failure it does not envelope.
- *
- * Every error the application raises itself comes back as
- * `{"error": {"code", "message"}}`. Request validation is deliberately left in
- * the framework's `{"detail": [...]}` shape because those entries carry the
- * schema's own rejection reason — including the point-in-time rule that history
- * rows must be strictly earlier than the scored transaction. Reporting only
- * "Request failed (422)" would discard the single most useful message the API
- * produces, so the field path and reason are joined here instead.
- */
+// FastAPI validation errors retain their own detail array instead of the application envelope.
 function validationMessage(detail: unknown): string | null {
   if (!Array.isArray(detail)) return null;
 
@@ -45,10 +36,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiError;
-    const detail = body.detail;
+    const body = (await response.json().catch(() => null)) as ApiError | null;
+    const detail = body?.detail;
     throw new Error(
-      body.error?.message ??
+      body?.error?.message ??
         (typeof detail === "string" ? detail : validationMessage(detail)) ??
         `Request failed (${response.status})`,
     );

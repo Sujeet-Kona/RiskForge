@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getDecisionHistory,
   getHealth,
@@ -7,6 +7,12 @@ import {
   scoreTransaction,
 } from "./api";
 import type { HealthResponse, ScoreRequest } from "./types";
+
+// All payloads and credentials are synthetic; fetch never reaches a server.
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected unstubbed API request"));
+});
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -126,6 +132,53 @@ describe("request wiring", () => {
 });
 
 describe("error reporting", () => {
+  it("falls back to the HTTP status for a JSON null error body", async () => {
+    const fetchMock = stubFetch(jsonResponse(503, null));
+
+    await expect(getHealth()).rejects.toThrow("Request failed (503)");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the HTTP status when every validation entry is malformed", async () => {
+    stubFetch(jsonResponse(422, {
+      detail: [null, false, 7, "synthetic-invalid-entry", {}, [], { loc: ["body", "history"] }, { msg: 123 }, { msg: null }],
+    }));
+
+    await expect(scoreTransaction(SCORE_REQUEST, "synthetic-key")).rejects.toThrow("Request failed (422)");
+  });
+
+  it("ignores malformed validation entries without discarding usable errors", async () => {
+    stubFetch(jsonResponse(422, {
+      detail: [
+        null,
+        { loc: ["body", "transaction", "TransactionAmt"], msg: "Synthetic amount error" },
+        "synthetic-invalid-entry",
+        { msg: { reason: "not a string" } },
+        { loc: ["body", "history"], msg: "Synthetic history error" },
+      ],
+    }));
+
+    await expect(scoreTransaction(SCORE_REQUEST, "synthetic-key")).rejects.toThrow(
+      "TransactionAmt: Synthetic amount error; history: Synthetic history error",
+    );
+  });
+
+  it("uses the validation message alone when its field location is missing or malformed", async () => {
+    stubFetch(jsonResponse(422, {
+      detail: [
+        { msg: "Synthetic missing location" },
+        { loc: null, msg: "Synthetic null location" },
+        { loc: "body.history", msg: "Synthetic non-array location" },
+        { loc: [], msg: "Synthetic empty location" },
+        { loc: ["body", 0], msg: "Synthetic numeric location" },
+      ],
+    }));
+
+    await expect(scoreTransaction(SCORE_REQUEST, "synthetic-key")).rejects.toThrow(
+      "Synthetic missing location; Synthetic null location; Synthetic non-array location; Synthetic empty location; Synthetic numeric location",
+    );
+  });
+
   it("prefers the application error envelope", async () => {
     stubFetch(
       jsonResponse(401, {

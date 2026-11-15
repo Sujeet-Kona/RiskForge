@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import {
   getDecisionHistory,
@@ -9,17 +9,17 @@ import {
   scoreTransaction,
 } from "./api";
 import type {
+  AuditDecisionListResponse,
   AuditDecisionSummary,
   HealthResponse,
   ReasonCode,
   ReviewCase,
+  ReviewQueueResponse,
+  ReviewResolutionResponse,
   ScoreResponse,
 } from "./types";
 
-// The whole API surface is mocked: these tests exercise rendering, state
-// transitions and accessibility, not the request wiring, which src/api.test.ts
-// covers against a stubbed fetch. Every identifier below is synthetic — none of
-// it describes the frozen production artifact.
+// All fixtures and credentials are synthetic; the entire API is mocked.
 vi.mock("./api", () => ({
   getHealth: vi.fn(),
   getDecisionHistory: vi.fn(),
@@ -135,6 +135,17 @@ const REVIEW_CASE: ReviewCase = {
 
 const EMPTY_HISTORY = { items: [], total: 0, limit: 8, offset: 0 };
 const EMPTY_QUEUE = { items: [], total: 0, limit: 20, offset: 0 };
+const PENDING_QUEUE = { ...EMPTY_QUEUE, items: [REVIEW_CASE], total: 1 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function scoringForm(): HTMLFormElement {
   return screen.getByRole("form", { name: "Score a transaction" });
@@ -167,15 +178,28 @@ async function loadReviewQueue() {
 }
 
 beforeEach(() => {
-  // The api module is mocked once for the whole file, so its call history would
-  // otherwise carry over from the previous test.
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected fetch in UI test"));
   vi.mocked(getHealth).mockResolvedValue(HEALTHY);
   vi.mocked(getDecisionHistory).mockResolvedValue(EMPTY_HISTORY);
   vi.mocked(getReviewQueue).mockResolvedValue(EMPTY_QUEUE);
 });
 
 describe("system status", () => {
+  it.each([
+    { missing: "artifact", artifact: undefined },
+    { missing: "n_features", artifact: {} },
+  ])("shows an unknown feature contract when $missing is missing", async ({ artifact }) => {
+    vi.mocked(getHealth).mockResolvedValue({ ...HEALTHY, artifact });
+
+    await renderReady();
+
+    const card = screen.getByText("FEATURE CONTRACT").closest(".metric-card");
+    expect(within(card as HTMLElement).getByText("—")).toBeInTheDocument();
+    expect(within(card as HTMLElement).queryByText("28")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run risk assessment/i })).toBeEnabled();
+  });
+
   it("reports the feature contract size from the API rather than a constant", async () => {
     vi.mocked(getHealth).mockResolvedValue({
       ...HEALTHY,
@@ -217,6 +241,95 @@ describe("system status", () => {
 });
 
 describe("decision rendering", () => {
+  it.each([
+    { outcome: "ALLOW", label: "Allow", probability: 0.032, percent: "3.20", explanation: "Synthetic probability is below the review threshold." },
+    { outcome: "REVIEW", label: "Review", probability: 0.0912, percent: "9.12", explanation: "Synthetic probability is between the review and block thresholds." },
+    { outcome: "BLOCK", label: "Block", probability: 0.1834, percent: "18.34", explanation: "Synthetic probability is above the block threshold." },
+  ] as const)("renders $outcome with its calibrated probability and announcement", async ({ outcome, label, probability, percent, explanation }) => {
+    vi.mocked(scoreTransaction).mockResolvedValue({
+      ...SCORE_RESPONSE,
+      decision: outcome,
+      risk_probability: probability,
+      decision_explanation: explanation,
+      decision_reason_code: {
+        code: `synthetic_${outcome.toLowerCase()}`,
+        title: label,
+        type: "policy",
+        description: explanation,
+      },
+    });
+    await renderReady();
+    const region = resultRegion();
+    const status = within(region).getByRole("status");
+
+    fireEvent.submit(scoringForm());
+
+    const decision = await within(region).findByText(label);
+    expect(decision.closest(".decision-banner")).toHaveClass(outcome.toLowerCase());
+    expect(within(region).getByText(`${percent}%`)).toBeInTheDocument();
+    expect(within(region).getByText("Review 7.5%")).toBeInTheDocument();
+    expect(within(region).getByText("Block 11.0%")).toBeInTheDocument();
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent(`Decision ${label}. Calibrated fraud probability ${percent} percent. ${explanation}`);
+  });
+
+  it("renders empty signals without retaining a previous assessment's signals", async () => {
+    vi.mocked(scoreTransaction)
+      .mockResolvedValueOnce(SCORE_RESPONSE)
+      .mockResolvedValueOnce({
+        ...SCORE_RESPONSE,
+        reason_codes: [],
+        risk_decreasing_signals: [],
+        model_detail: {
+          ...SCORE_RESPONSE.model_detail,
+          total_risk_increasing: 0,
+          total_risk_decreasing: 0,
+        },
+      });
+    await renderReady();
+    fireEvent.submit(scoringForm());
+    await within(resultRegion()).findByText(RISK_INCREASING.title);
+    expect(within(resultRegion()).getByText(RISK_DECREASING.title)).toBeInTheDocument();
+
+    fireEvent.submit(scoringForm());
+
+    expect(await within(resultRegion()).findByText("No risk-increasing signals returned.")).toBeInTheDocument();
+    expect(within(resultRegion()).queryByText(RISK_INCREASING.title)).not.toBeInTheDocument();
+    expect(within(resultRegion()).queryByText(RISK_DECREASING.title)).not.toBeInTheDocument();
+    expect(within(resultRegion()).queryByRole("heading", { name: "Risk-reducing signals" })).not.toBeInTheDocument();
+    expect(within(resultRegion()).getByText("Block")).toBeInTheDocument();
+    expect(within(resultRegion()).getByText("18.34%")).toBeInTheDocument();
+  });
+
+  it("keeps separate features with the same reason code stable across result updates", async () => {
+    const consoleError = vi.spyOn(console, "error");
+    const secondSignal = {
+      ...RISK_INCREASING,
+      title: "Synthetic second amount signal",
+      feature: "amount_log1p",
+    };
+    vi.mocked(scoreTransaction)
+      .mockResolvedValueOnce({
+        ...SCORE_RESPONSE,
+        reason_codes: [RISK_INCREASING, secondSignal],
+      })
+      .mockResolvedValueOnce({
+        ...SCORE_RESPONSE,
+        reason_codes: [secondSignal],
+      });
+    await renderReady();
+    fireEvent.submit(scoringForm());
+    await within(resultRegion()).findByText(secondSignal.title);
+    expect(within(resultRegion()).getAllByText("0.412")).toHaveLength(2);
+
+    fireEvent.submit(scoringForm());
+    await within(resultRegion()).findByText(secondSignal.title);
+
+    expect(within(resultRegion()).queryByText(RISK_INCREASING.title)).not.toBeInTheDocument();
+    expect(within(resultRegion()).getAllByText("0.412")).toHaveLength(1);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
   it("starts in the empty state", async () => {
     await renderReady();
 
@@ -290,6 +403,87 @@ describe("decision rendering", () => {
     expect(vi.mocked(scoreTransaction).mock.calls[2][1]).not.toBe(first[1]);
   });
 
+  it("rotates the idempotency key when only prior history changes", async () => {
+    vi.mocked(scoreTransaction).mockResolvedValue(SCORE_RESPONSE);
+    await renderReady();
+    fireEvent.submit(scoringForm());
+    await within(resultRegion()).findByText("Block");
+    const [firstPayload, firstKey] = vi.mocked(scoreTransaction).mock.calls[0];
+    const syntheticHistory = [{ TransactionDT: 10, TransactionAmt: 4.2 }];
+
+    fireEvent.change(screen.getByLabelText(/prior transaction history/i), {
+      target: { value: JSON.stringify(syntheticHistory) },
+    });
+    expect(screen.getByText("1 records")).toBeInTheDocument();
+    fireEvent.submit(scoringForm());
+    await within(resultRegion()).findByText("Block");
+
+    expect(scoreTransaction).toHaveBeenCalledTimes(2);
+    const [secondPayload, secondKey] = vi.mocked(scoreTransaction).mock.calls[1];
+    expect(firstPayload.history).toEqual([]);
+    expect(secondPayload).toEqual({ ...firstPayload, history: syntheticHistory });
+    expect(firstKey).toEqual(expect.any(String));
+    expect(firstKey).not.toBe("");
+    expect(secondKey).toEqual(expect.any(String));
+    expect(secondKey).not.toBe("");
+    expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("reuses the same payload and idempotency key after a network failure", async () => {
+    vi.mocked(scoreTransaction)
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(SCORE_RESPONSE);
+    await renderReady();
+    fireEvent.submit(scoringForm());
+    expect(await within(scoringForm()).findByRole("alert")).toHaveTextContent("Failed to fetch");
+    expect(screen.getByRole("button", { name: /run risk assessment/i })).toBeEnabled();
+    expect(getDecisionHistory).toHaveBeenCalledTimes(1);
+
+    fireEvent.submit(scoringForm());
+    await within(resultRegion()).findByText("Block");
+
+    expect(scoreTransaction).toHaveBeenCalledTimes(2);
+    const [first, retry] = vi.mocked(scoreTransaction).mock.calls;
+    expect(first[1]).toEqual(expect.any(String));
+    expect(first[1]).not.toBe("");
+    expect(retry).toEqual(first);
+    expect(within(scoringForm()).queryByRole("alert")).not.toBeInTheDocument();
+    expect(getDecisionHistory).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects invalid history JSON locally without making a scoring request", async () => {
+    await renderReady();
+    fireEvent.change(screen.getByLabelText(/prior transaction history/i), {
+      target: { value: '[{"TransactionDT": 1}' },
+    });
+
+    fireEvent.submit(scoringForm());
+
+    expect(await within(scoringForm()).findByRole("alert")).toHaveTextContent(/JSON/i);
+    expect(scoreTransaction).not.toHaveBeenCalled();
+    expect(within(resultRegion()).getByText("Awaiting assessment")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run risk assessment/i })).toBeEnabled();
+  });
+
+  it("treats blank history as an empty array", async () => {
+    vi.mocked(scoreTransaction).mockResolvedValue({ ...SCORE_RESPONSE, history_transactions_used: 0 });
+    await renderReady();
+    fireEvent.change(screen.getByLabelText(/prior transaction history/i), {
+      target: { value: " \n\t " },
+    });
+
+    fireEvent.submit(scoringForm());
+    await within(resultRegion()).findByText("Block");
+
+    expect(scoreTransaction).toHaveBeenCalledTimes(1);
+    expect(scoreTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ history: [] }),
+      expect.any(String),
+    );
+    expect(screen.getByText("0 records")).toBeInTheDocument();
+    expect(within(scoringForm()).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("rejects a history payload that is not an array before calling the API", async () => {
     await renderReady();
 
@@ -347,6 +541,46 @@ describe("error states", () => {
 });
 
 describe("audit history", () => {
+  it("keeps its status mounted through loading, failure and a successful retry without claiming an empty audit", async () => {
+    const pending = deferred<AuditDecisionListResponse>();
+    vi.mocked(getDecisionHistory).mockReturnValueOnce(pending.promise);
+    await renderReady();
+    const region = screen.getByRole("region", { name: "Recent decisions" });
+    const status = within(region).getByRole("status");
+    const refresh = within(region).getByRole("button", { name: "Refresh decision history" });
+    expect(status).toHaveTextContent("Loading recorded decisions…");
+    expect(refresh).toBeDisabled();
+    expect(refresh).toHaveAttribute("aria-busy", "true");
+    expect(within(region).queryByText(/No persisted decisions yet/)).not.toBeInTheDocument();
+    fireEvent.click(refresh);
+    expect(getDecisionHistory).toHaveBeenCalledTimes(1);
+
+    await act(async () => { pending.reject(new Error("Synthetic audit unavailable")); });
+
+    expect(within(region).getByRole("alert")).toHaveTextContent("Synthetic audit unavailable");
+    expect(within(region).getByText("Decision history could not be loaded.")).toBeInTheDocument();
+    expect(within(region).queryByText(/No persisted decisions yet/)).not.toBeInTheDocument();
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(status).toBeEmptyDOMElement();
+    expect(refresh).toBeEnabled();
+    expect(refresh).toHaveAttribute("aria-busy", "false");
+
+    const retry = deferred<AuditDecisionListResponse>();
+    vi.mocked(getDecisionHistory).mockReturnValueOnce(retry.promise);
+    fireEvent.click(refresh);
+    expect(status).toHaveTextContent("Loading recorded decisions…");
+    await act(async () => {
+      retry.resolve({ ...EMPTY_HISTORY, items: [HISTORY_ROW], total: 1 });
+    });
+
+    expect(getDecisionHistory).toHaveBeenCalledTimes(2);
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent("1 recent decisions loaded.");
+    expect(within(region).getByText(HISTORY_ROW.transaction_id)).toBeInTheDocument();
+    expect(within(region).queryByRole("alert")).not.toBeInTheDocument();
+    expect(refresh).toBeEnabled();
+  });
+
   it("shows the empty state when nothing has been persisted", async () => {
     await renderReady();
 
@@ -387,6 +621,217 @@ describe("audit history", () => {
 });
 
 describe("review queue", () => {
+  it("distinguishes an authenticated empty queue from a queue that has not been loaded", async () => {
+    await renderReady();
+    const region = reviewRegion();
+    const status = within(region).getByRole("status");
+    expect(status).toBeEmptyDOMElement();
+    expect(within(region).getByText("No pending cases loaded. Authenticate to retrieve the review queue.")).toBeInTheDocument();
+    expect(within(region).queryByText("No pending review cases.")).not.toBeInTheDocument();
+    expect(getReviewQueue).not.toHaveBeenCalled();
+
+    enterReviewerKey("reviewer-secret");
+    expect(status).toBeEmptyDOMElement();
+    fireEvent.click(within(region).getByRole("button", { name: "Load pending cases" }));
+    await waitFor(() => expect(status).toHaveTextContent("0 pending review cases loaded."));
+
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(within(region).getByText("No pending review cases.")).toBeInTheDocument();
+    expect(within(region).queryByText(/Authenticate to retrieve/)).not.toBeInTheDocument();
+    expect(within(region).queryByRole("alert")).not.toBeInTheDocument();
+    expect(getReviewQueue).toHaveBeenCalledExactlyOnceWith("reviewer-secret");
+
+    enterReviewerKey("synthetic-other-key");
+    expect(status).toBeEmptyDOMElement();
+    expect(within(region).queryByText("No pending review cases.")).not.toBeInTheDocument();
+    expect(within(region).getByText(/Authenticate to retrieve/)).toBeInTheDocument();
+    expect(getReviewQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears old cases and disables credentials and duplicate loads while the queue is loading", async () => {
+    const pending = deferred<ReviewQueueResponse>();
+    vi.mocked(getReviewQueue)
+      .mockResolvedValueOnce(PENDING_QUEUE)
+      .mockReturnValueOnce(pending.promise);
+    await loadReviewQueue();
+    const region = reviewRegion();
+    const status = within(region).getByRole("status");
+    const key = within(region).getByLabelText(/reviewer api key/i);
+    expect(status).toHaveTextContent("1 pending review cases loaded.");
+
+    fireEvent.click(within(region).getByRole("button", { name: "Load pending cases" }));
+
+    const load = within(region).getByRole("button", { name: "Loading…" });
+    expect(load).toBeDisabled();
+    expect(load).toHaveAttribute("aria-busy", "true");
+    expect(key).toBeDisabled();
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent("Loading review cases…");
+    expect(within(region).queryByRole("article")).not.toBeInTheDocument();
+    expect(within(region).queryByText("No pending review cases.")).not.toBeInTheDocument();
+    expect(within(region).queryByText(/Authenticate to retrieve/)).not.toBeInTheDocument();
+    fireEvent.click(load);
+    expect(getReviewQueue).toHaveBeenCalledTimes(2);
+
+    await act(async () => { pending.resolve(PENDING_QUEUE); });
+
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent("1 pending review cases loaded.");
+    expect(within(region).getByRole("article", { name: REVIEW_CASE.transaction_id })).toBeInTheDocument();
+    expect(key).toBeEnabled();
+    expect(key).toHaveValue("reviewer-secret");
+    expect(load).toHaveTextContent("Load pending cases");
+    expect(load).toBeEnabled();
+    expect(load).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("locks every resolution button and credential control until resolution and both refreshes finish", async () => {
+    const secondCase: ReviewCase = { ...REVIEW_CASE, case_id: 5, decision_id: 100, transaction_id: "RF-TEST-5" };
+    const resolution = deferred<ReviewResolutionResponse>();
+    const queueRefresh = deferred<ReviewQueueResponse>();
+    const historyRefresh = deferred<AuditDecisionListResponse>();
+    vi.mocked(getReviewQueue)
+      .mockResolvedValueOnce({ ...EMPTY_QUEUE, items: [REVIEW_CASE, secondCase], total: 2 })
+      .mockReturnValueOnce(queueRefresh.promise);
+    vi.mocked(getDecisionHistory)
+      .mockResolvedValueOnce(EMPTY_HISTORY)
+      .mockReturnValueOnce(historyRefresh.promise);
+    vi.mocked(resolveReviewCase).mockReturnValueOnce(resolution.promise);
+    await loadReviewQueue();
+    const region = reviewRegion();
+    const status = within(region).getByRole("status");
+    const key = within(region).getByLabelText(/reviewer api key/i);
+    const load = within(region).getByRole("button", { name: "Load pending cases" });
+    const actions = within(region).getAllByRole("button", { name: /clear transaction|confirm suspected fraud/i });
+    expect(actions).toHaveLength(4);
+
+    fireEvent.click(actions[0]);
+
+    expect(status).toHaveTextContent("Recording review outcome…");
+    for (const button of actions) expect(button).toBeDisabled();
+    expect(actions[0]).toHaveAttribute("aria-busy", "true");
+    expect(actions[1]).toHaveAttribute("aria-busy", "true");
+    expect(actions[2]).toHaveAttribute("aria-busy", "false");
+    expect(key).toBeDisabled();
+    expect(load).toBeDisabled();
+    fireEvent.click(actions[1]);
+    fireEvent.click(actions[3]);
+    fireEvent.click(load);
+    expect(resolveReviewCase).toHaveBeenCalledExactlyOnceWith(4, "reviewer-secret", "APPROVED", "");
+    expect(getReviewQueue).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolution.resolve({ case: { ...REVIEW_CASE, status: "APPROVED" } });
+    });
+
+    expect(getReviewQueue).toHaveBeenCalledTimes(2);
+    expect(status).toHaveTextContent("Loading review cases…");
+    expect(key).toBeDisabled();
+    expect(load).toBeDisabled();
+    expect(within(region).queryByRole("article")).not.toBeInTheDocument();
+    expect(getDecisionHistory).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      queueRefresh.resolve({ ...EMPTY_QUEUE, items: [secondCase], total: 1 });
+    });
+
+    expect(getDecisionHistory).toHaveBeenCalledTimes(2);
+    expect(status).toHaveTextContent("Recording review outcome…");
+    expect(key).toBeDisabled();
+    expect(load).toBeDisabled();
+    const remainingActions = within(region).getAllByRole("button", { name: /clear transaction|confirm suspected fraud/i });
+    expect(remainingActions).toHaveLength(2);
+    for (const button of remainingActions) expect(button).toBeDisabled();
+
+    await act(async () => { historyRefresh.resolve(EMPTY_HISTORY); });
+
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent("RF-TEST-4 recorded as APPROVED. The original model decision remains REVIEW.");
+    expect(key).toBeEnabled();
+    expect(load).toBeEnabled();
+    for (const button of remainingActions) expect(button).toBeEnabled();
+    expect(within(region).queryByRole("article", { name: REVIEW_CASE.transaction_id })).not.toBeInTheDocument();
+    expect(within(region).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("preserves resolution success alongside a queue refresh failure", async () => {
+    vi.mocked(getReviewQueue)
+      .mockResolvedValueOnce(PENDING_QUEUE)
+      .mockRejectedValueOnce(new Error("Synthetic queue refresh unavailable"));
+    vi.mocked(resolveReviewCase).mockResolvedValueOnce({ case: { ...REVIEW_CASE, status: "APPROVED" } });
+    await loadReviewQueue();
+    const region = reviewRegion();
+    const status = within(region).getByRole("status");
+
+    fireEvent.click(within(region).getByRole("button", { name: /clear transaction/i }));
+    await waitFor(() => expect(status).toHaveTextContent("RF-TEST-4 recorded as APPROVED. The original model decision remains REVIEW."));
+
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(status).toHaveClass("success");
+    expect(within(region).getByRole("alert")).toHaveTextContent("Synthetic queue refresh unavailable");
+    expect(within(region).getByText("Review queue could not be loaded.")).toBeInTheDocument();
+    expect(within(region).queryByText("No pending review cases.")).not.toBeInTheDocument();
+    expect(within(region).queryByRole("article")).not.toBeInTheDocument();
+    expect(within(region).getByLabelText(/reviewer api key/i)).toBeEnabled();
+    expect(within(region).getByRole("button", { name: "Load pending cases" })).toBeEnabled();
+    expect(resolveReviewCase).toHaveBeenCalledExactlyOnceWith(4, "reviewer-secret", "APPROVED", "");
+    expect(getReviewQueue).toHaveBeenCalledTimes(2);
+    expect(getDecisionHistory).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears prior cases and notes when the reviewer key changes", async () => {
+    vi.mocked(getReviewQueue).mockResolvedValue(PENDING_QUEUE);
+    vi.mocked(resolveReviewCase).mockResolvedValueOnce({ case: { ...REVIEW_CASE, status: "REJECTED" } });
+    await loadReviewQueue();
+    const region = reviewRegion();
+    const status = within(region).getByRole("status");
+    fireEvent.change(within(region).getByLabelText(/reviewer notes/i), {
+      target: { value: "Synthetic private note for the first reviewer." },
+    });
+
+    enterReviewerKey("synthetic-second-reviewer");
+
+    expect(within(region).queryByRole("article")).not.toBeInTheDocument();
+    expect(within(region).queryByLabelText(/reviewer notes/i)).not.toBeInTheDocument();
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(status).toBeEmptyDOMElement();
+    expect(within(region).getByText(/Authenticate to retrieve/)).toBeInTheDocument();
+    expect(getReviewQueue).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(region).getByRole("button", { name: "Load pending cases" }));
+    await within(region).findByRole("article", { name: REVIEW_CASE.transaction_id });
+
+    expect(getReviewQueue).toHaveBeenNthCalledWith(2, "synthetic-second-reviewer");
+    expect(within(region).getByLabelText(/reviewer notes/i)).toHaveValue("");
+    vi.mocked(getReviewQueue).mockResolvedValueOnce(EMPTY_QUEUE);
+    fireEvent.click(within(region).getByRole("button", { name: /confirm suspected fraud/i }));
+    await waitFor(() => expect(status).toHaveTextContent("RF-TEST-4 recorded as REJECTED."));
+    expect(resolveReviewCase).toHaveBeenCalledExactlyOnceWith(4, "synthetic-second-reviewer", "REJECTED", "");
+  });
+
+  it("clears prior success and error notices when the reviewer key is removed", async () => {
+    vi.mocked(getReviewQueue)
+      .mockResolvedValueOnce(PENDING_QUEUE)
+      .mockRejectedValueOnce(new Error("Synthetic queue refresh unavailable"));
+    vi.mocked(resolveReviewCase).mockResolvedValueOnce({ case: { ...REVIEW_CASE, status: "APPROVED" } });
+    await loadReviewQueue();
+    const region = reviewRegion();
+    const status = within(region).getByRole("status");
+    fireEvent.click(within(region).getByRole("button", { name: /clear transaction/i }));
+    await waitFor(() => expect(status).toHaveTextContent("RF-TEST-4 recorded as APPROVED."));
+    expect(within(region).getByRole("alert")).toHaveTextContent("Synthetic queue refresh unavailable");
+
+    enterReviewerKey("");
+
+    expect(within(region).getByRole("status")).toBe(status);
+    expect(status).toBeEmptyDOMElement();
+    expect(status).not.toHaveClass("success");
+    expect(within(region).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(region).queryByText("Review queue could not be loaded.")).not.toBeInTheDocument();
+    expect(within(region).getByText(/Authenticate to retrieve/)).toBeInTheDocument();
+    expect(within(region).getByRole("button", { name: "Load pending cases" })).toBeDisabled();
+    expect(getReviewQueue).toHaveBeenCalledTimes(2);
+  });
+
   it("will not call the API without a reviewer key", async () => {
     await renderReady();
 

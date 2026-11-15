@@ -36,6 +36,7 @@ function App() {
   const [reviewerKey, setReviewerKey] = useState("");
   const [reviewCases, setReviewCases] = useState<ReviewCase[]>([]);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewLoaded, setReviewLoaded] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const [reviewNotice, setReviewNotice] = useState("");
   const [reviewActionId, setReviewActionId] = useState<number | null>(null);
@@ -89,12 +90,14 @@ function App() {
       return;
     }
     setReviewLoading(true);
+    setReviewLoaded(false);
     setReviewError("");
     setReviewNotice("");
     setReviewCases([]);
     try {
       const page = await getReviewQueue(reviewerKey.trim());
       setReviewCases(page.items);
+      setReviewLoaded(true);
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : "Could not load review queue");
     } finally {
@@ -162,6 +165,15 @@ function App() {
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((current) => ({ ...current, [key]: value }));
     setIdempotencyKey(crypto.randomUUID());
+  }
+
+  function changeReviewerKey(value: string) {
+    setReviewerKey(value);
+    setReviewCases([]);
+    setReviewComments({});
+    setReviewLoaded(false);
+    setReviewError("");
+    setReviewNotice("");
   }
 
   async function submitScore(event: FormEvent<HTMLFormElement>) {
@@ -350,8 +362,8 @@ function App() {
                 </div>
                 <div className="result-meta"><div><span>MODEL</span><strong>{result.model_version}</strong></div><div><span>CALIBRATION</span><strong>{result.calibration_method}</strong></div><div><span>POLICY</span><strong>{result.policy_version}</strong></div><div><span>HISTORY USED</span><strong>{result.history_transactions_used}</strong></div></div>
                 <div className="signals-heading"><h3>Top model signals</h3><span>TreeSHAP · risk increasing</span></div>
-                {result.reason_codes.length ? result.reason_codes.map((item) => <div className="signal-row" key={item.code}><div><strong>{item.title}</strong><small>{item.feature}</small></div><span className="signal-value up"><ArrowUpRight size={13} /> {item.contribution.toFixed(3)}</span></div>) : <p className="muted-copy">No risk-increasing signals returned.</p>}
-                {result.risk_decreasing_signals.length > 0 && <><div className="signals-heading secondary-signals"><h3>Risk-reducing signals</h3></div>{result.risk_decreasing_signals.map((item) => <div className="signal-row" key={item.code}><div><strong>{item.title}</strong><small>{item.feature}</small></div><span className="signal-value down"><ArrowDownRight size={13} /> {item.contribution.toFixed(3)}</span></div>)}</>}
+                {result.reason_codes.length ? result.reason_codes.map((item) => <div className="signal-row" key={`${item.direction}:${item.feature}`}><div><strong>{item.title}</strong><small>{item.feature}</small></div><span className="signal-value up"><ArrowUpRight size={13} /> {item.contribution.toFixed(3)}</span></div>) : <p className="muted-copy">No risk-increasing signals returned.</p>}
+                {result.risk_decreasing_signals.length > 0 && <><div className="signals-heading secondary-signals"><h3>Risk-reducing signals</h3></div>{result.risk_decreasing_signals.map((item) => <div className="signal-row" key={`${item.direction}:${item.feature}`}><div><strong>{item.title}</strong><small>{item.feature}</small></div><span className="signal-value down"><ArrowDownRight size={13} /> {item.contribution.toFixed(3)}</span></div>)}</>}
                 <div className="policy-explanation"><span>POLICY EXPLANATION</span><p>{result.decision_reason_code.description}</p></div>
                 <div className="result-foot">Transaction {result.transaction_id} · {result.feature_count} features · {result.feature_version}</div>
               </div>
@@ -366,8 +378,9 @@ function App() {
             <button className="icon-button" type="button" onClick={() => void refreshHistory()} aria-label="Refresh decision history" aria-busy={historyLoading} disabled={historyLoading}><RefreshCw size={15} aria-hidden="true" /></button>
           </div>
           {historyError && <div className="notice warning" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{historyError}</span></div>}
+          <p className="visually-hidden" role="status">{historyLoading ? "Loading recorded decisions…" : historyError ? "" : historyRows.length ? `${historyRows.length} recent decisions loaded.` : "No persisted decisions yet."}</p>
           {historyRows.length === 0 ? (
-            <div className="history-empty" role="status">{historyLoading ? "Loading recorded decisions…" : "No persisted decisions yet. Score a transaction to create the first audit record."}</div>
+            <div className="history-empty">{historyLoading ? "Loading recorded decisions…" : historyError ? "Decision history could not be loaded." : "No persisted decisions yet. Score a transaction to create the first audit record."}</div>
           ) : (
             <div className="history-table-wrap">
               <table className="history-table">
@@ -394,14 +407,14 @@ function App() {
             <span className="panel-symbol"><ShieldAlert size={18} aria-hidden="true" /></span>
           </div>
           <div className="review-access">
-            <label className="field"><span>Reviewer API key <em>held in memory only</em></span><input type="password" autoComplete="off" placeholder="Enter the server-configured reviewer key" value={reviewerKey} onChange={(e) => setReviewerKey(e.target.value)} /></label>
-            <button className="secondary-button" type="button" onClick={() => void loadReviewQueue()} aria-busy={reviewLoading} disabled={reviewLoading || !reviewerKey.trim()}>{reviewLoading ? "Loading…" : "Load pending cases"}</button>
+            <label className="field"><span>Reviewer API key <em>held in memory only</em></span><input type="password" autoComplete="off" placeholder="Enter the server-configured reviewer key" value={reviewerKey} disabled={reviewLoading || reviewActionId !== null} onChange={(e) => changeReviewerKey(e.target.value)} /></label>
+            <button className="secondary-button" type="button" onClick={() => void loadReviewQueue()} aria-busy={reviewLoading} disabled={reviewLoading || reviewActionId !== null || !reviewerKey.trim()}>{reviewLoading ? "Loading…" : "Load pending cases"}</button>
           </div>
           <p className="form-hint"><CircleHelp size={14} aria-hidden="true" /> The key is sent only in the request header and is not saved in browser storage. Configure a local reviewer key on the API before using this workflow.</p>
           {reviewError && <div className="notice error" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{reviewError}</span></div>}
-          {reviewNotice && <div className="notice success" role="status"><CheckCircle2 size={16} aria-hidden="true" /><span>{reviewNotice}</span></div>}
+          <p className={reviewNotice ? "notice success" : "visually-hidden"} role="status">{reviewLoading ? "Loading review cases…" : reviewActionId !== null ? "Recording review outcome…" : reviewNotice || (reviewLoaded ? `${reviewCases.length} pending review cases loaded.` : "")}</p>
           {reviewCases.length === 0 ? (
-            <div className="history-empty" role="status">{reviewLoading ? "Loading review cases…" : "No pending cases loaded. Authenticate to retrieve the review queue."}</div>
+            <div className="history-empty">{reviewLoading ? "Loading review cases…" : reviewError ? "Review queue could not be loaded." : reviewLoaded ? "No pending review cases." : "No pending cases loaded. Authenticate to retrieve the review queue."}</div>
           ) : (
             <div className="review-list">
               {reviewCases.map((item) => (
@@ -416,7 +429,7 @@ function App() {
                   </div>
                   <p className="review-explanation">{item.decision_explanation}</p>
                   <div className="review-signals">
-                    {item.reason_codes.slice(0, 3).map((signal) => <span key={signal.code}>{signal.title}</span>)}
+                    {item.reason_codes.slice(0, 3).map((signal) => <span key={`${signal.direction}:${signal.feature}`}>{signal.title}</span>)}
                   </div>
                   <label className="field review-comment"><span>Reviewer notes <em>optional</em></span><textarea rows={2} value={reviewComments[item.case_id] ?? ""} onChange={(e) => setReviewComments((current) => ({ ...current, [item.case_id]: e.target.value }))} placeholder="Record the evidence or rationale for this outcome…" /></label>
                   <div className="review-actions">
