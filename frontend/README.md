@@ -33,13 +33,17 @@ The Vite development server proxies `/api` requests to the FastAPI service. Set
   feature engineering, calibration, TreeSHAP or policy thresholds in JavaScript.
 - Displays the calibrated probability, original policy decision, model signals,
   risk-reducing signals and model/feature/policy versions returned by the API.
+- Reads persisted decisions from the paginated `GET /v1/audit/decisions` endpoint.
+- Provides an authenticated review queue and resolution actions. The reviewer key
+  is entered at runtime, held only in component memory, and sent in the
+  `X-Reviewer-API-Key` header.
 - Keeps transaction history input explicit: the caller supplies strictly-prior
   history as JSON, matching the backend's point-in-time contract.
 
-Persisted decision history is read from the paginated audit endpoint. The
-human-review workflow remains planned until its case lifecycle, reviewer
-identity, authorization and append-only action history are implemented. The
-dashboard does not fabricate transaction counts or sample risk decisions.
+The review workflow is a single configured local reviewer, not a production
+identity provider. The original model decision is preserved as REVIEW; human
+resolution is stored separately. The dashboard does not fabricate transaction
+counts or sample risk decisions.
 
 ## Production note
 

@@ -92,3 +92,49 @@ export interface ApiError {
   error?: { code?: string; message?: string };
   detail?: unknown;
 }
+
+export type ReviewStatus = "PENDING" | "APPROVED" | "REJECTED";
+export type ReviewOutcome = "APPROVED" | "REJECTED";
+
+export interface ReviewCase {
+  case_id: number;
+  decision_id: number;
+  status: ReviewStatus;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_comment: string | null;
+  transaction_id: string;
+  risk_probability: number;
+  decision: Decision;
+  reason_codes: ReasonCode[];
+  risk_decreasing_signals: ReasonCode[];
+  decision_reason_code: { code: string; title: string; type: string; description: string };
+  decision_explanation: string;
+  model_detail: {
+    base_value: number;
+    raw_margin: number;
+    raw_model_probability: number;
+    attribution_space: string;
+    attribution_space_note: string;
+    total_risk_increasing: number;
+    total_risk_decreasing: number;
+  };
+  policy_detail: { review_threshold: number; block_threshold: number };
+  scored_inputs: Record<string, unknown>;
+  model_version: string;
+  feature_version: string;
+  policy_version: string;
+}
+
+export interface ReviewQueueResponse {
+  items: ReviewCase[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ReviewResolutionResponse {
+  case: ReviewCase;
+}

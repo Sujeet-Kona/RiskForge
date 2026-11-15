@@ -169,10 +169,34 @@ Policy research used synthetic assumptions: missed-fraud cost 100 units, false-d
 | GET | /health | Service, artifact identity, and database readiness |
 | POST | /v1/risk/score | Score one transaction using caller-supplied prior history |
 | GET | /v1/audit/decisions | Paginated, newest-first decision history; optional ALLOW/REVIEW/BLOCK filter |
+| GET | /v1/reviews | Authenticated pending review queue |
+| POST | /v1/reviews/{case_id}/resolve | Record an APPROVED or REJECTED human outcome without rewriting the model decision |
 
 The request includes the current transaction and a history array. History timestamps must be strictly earlier than the current transaction; same-timestamp and future records are rejected. Only the trailing 24 hours affect behavioral features. The API accepts at most 2,000 history records and rejects larger requests rather than truncating them. top_k controls returned reason signals (default 3).
 
-The service loads a local artifact identified as xgb-001 / behavioral-v1. It contains preprocessing, XGBoost, the isotonic calibrator, and feature/model/policy metadata. A scoring request validates input, builds the 28-feature row, scores and calibrates it, applies policy-001, creates TreeSHAP and policy explanations, and persists the decision to PostgreSQL before returning success. Missing or incompatible artifacts fail closed; audit-write failure prevents a successful response.
+The service loads a local artifact identified as xgb-001 / behavioral-v1. It contains preprocessing, XGBoost, the isotonic calibrator, and feature/model/policy metadata. A scoring request validates input, builds the 28-feature row, scores and calibrates it, applies policy-001, creates TreeSHAP and policy explanations, and persists the decision to PostgreSQL before returning success. REVIEW decisions also create a separate pending review case in the same database transaction. Missing or incompatible artifacts fail closed; audit-write failure prevents a successful response.
+
+### Human review
+
+A reviewer queue is available for automated REVIEW decisions. Configure
+`RISKFORGE_REVIEWER_API_KEY` and `RISKFORGE_REVIEWER_ID` in the API environment.
+The API requires the key in the `X-Reviewer-API-Key` header for queue reads and
+resolution actions. This is a deliberately small, single-reviewer local demo
+credential, not a multi-user identity provider.
+
+A reviewer may mark a case APPROVED or REJECTED once, with an optional comment.
+The automated decision remains REVIEW in the original decision record. The
+mutable review-case state and append-only review event are stored separately.
+PostgreSQL triggers reject UPDATE/DELETE against the original risk decision and
+review-event tables; they do not make the database tamper-proof against a
+database administrator.
+
+Run the API with the local environment file loaded when using these settings:
+
+```bash
+uvicorn app.main:app --reload --env-file .env
+```
+
 
 TreeSHAP contributions are calculated on the raw XGBoost output margin (log-odds) and mapped back to the original 28 contract features. They are local model signals, not causal explanations, and are not calibrated-probability contributions. The policy explanation separately identifies the probability threshold band that produced the action.
 
@@ -262,7 +286,7 @@ Open http://127.0.0.1:8000/docs for the local API schema. The API does not train
 
 - app/ — FastAPI schemas, lifecycle, feature construction, and scoring.
 - frontend/ — React + TypeScript scoring dashboard and local API proxy.
-- db/ and alembic/ — PostgreSQL models, audit persistence, and migrations.
+- db/ and alembic/ — PostgreSQL models, decision audit persistence, review cases/events, and migrations.
 - ml/ — data contract, temporal features, split, preprocessing, models, calibration, and artifacts.
 - policy/ — decision thresholds and cost-assumption research.
 - explain/ — TreeSHAP attribution and reason-code mapping.
@@ -277,9 +301,10 @@ Open http://127.0.0.1:8000/docs for the local API schema. The API does not train
 - Bootstrap intervals resample transactions, not time blocks.
 - The API trusts caller-supplied history and cannot independently verify its completeness, freshness, authenticity, or entity association.
 - Prior-history rows are not stored with audit records, so the audit table alone cannot fully replay a score.
-- Append-only audit behavior is an application convention, not database-enforced immutability; idempotency and duplicate suppression are not implemented.
+- Idempotency and duplicate suppression are not implemented.
+- The reviewer API key is a single local operator credential, not enterprise authentication or multi-user role-based access control.
 - Policy costs and review-effectiveness assumptions are synthetic, not measured industry economics.
-- Authentication, TLS termination, rate limiting, production deployment, drift monitoring, continuous retraining, and a human-review operation are outside the current implementation.
+- TLS termination, rate limiting, production deployment, drift monitoring, and continuous retraining are outside the current implementation.
 
 ## Further documentation
 

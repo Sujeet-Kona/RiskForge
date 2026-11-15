@@ -4,8 +4,22 @@ import {
   ChevronDown, CircleHelp, Clock3, Command, FileText, Gauge, RefreshCw,
   Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, Sparkles, Wallet,
 } from "lucide-react";
-import { getDecisionHistory, getHealth, scoreTransaction } from "./api";
-import type { AuditDecisionSummary, Decision, HealthResponse, HistoryTransaction, ScoreResponse } from "./types";
+import {
+  getDecisionHistory,
+  getHealth,
+  getReviewQueue,
+  resolveReviewCase,
+  scoreTransaction,
+} from "./api";
+import type {
+  AuditDecisionSummary,
+  Decision,
+  HealthResponse,
+  HistoryTransaction,
+  ReviewCase,
+  ReviewOutcome,
+  ScoreResponse,
+} from "./types";
 
 const decisionMeta: Record<Decision, { label: string; className: string; icon: typeof ShieldCheck }> = {
   ALLOW: { label: "Allow", className: "allow", icon: ShieldCheck },
@@ -19,6 +33,13 @@ function App() {
   const [historyRows, setHistoryRows] = useState<AuditDecisionSummary[]>([]);
   const [historyError, setHistoryError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [reviewerKey, setReviewerKey] = useState("");
+  const [reviewCases, setReviewCases] = useState<ReviewCase[]>([]);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewNotice, setReviewNotice] = useState("");
+  const [reviewActionId, setReviewActionId] = useState<number | null>(null);
+  const [reviewComments, setReviewComments] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScoreResponse | null>(null);
   const [error, setError] = useState("");
@@ -58,6 +79,49 @@ function App() {
       setHistoryError(err instanceof Error ? err.message : "Could not load decision history");
     } finally {
       setHistoryLoading(false);
+    }
+  }
+
+  async function loadReviewQueue() {
+    if (!reviewerKey.trim()) {
+      setReviewError("Enter the reviewer API key configured on the FastAPI server.");
+      return;
+    }
+    setReviewLoading(true);
+    setReviewError("");
+    setReviewNotice("");
+    try {
+      const page = await getReviewQueue(reviewerKey.trim());
+      setReviewCases(page.items);
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Could not load review queue");
+    } finally {
+      setReviewLoading(false);
+    }
+  }
+
+  async function resolveCase(caseId: number, outcome: ReviewOutcome) {
+    if (!reviewerKey.trim()) return;
+    setReviewActionId(caseId);
+    setReviewError("");
+    setReviewNotice("");
+    try {
+      const response = await resolveReviewCase(
+        caseId,
+        reviewerKey.trim(),
+        outcome,
+        reviewComments[caseId] ?? "",
+      );
+      setReviewNotice(
+        `${response.case.transaction_id} recorded as ${response.case.status}. The original model decision remains REVIEW.`,
+      );
+      setReviewComments((current) => ({ ...current, [caseId]: "" }));
+      await loadReviewQueue();
+      await refreshHistory();
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Could not record review outcome");
+    } finally {
+      setReviewActionId(null);
     }
   }
 
@@ -147,7 +211,7 @@ function App() {
           <a className="nav-item active" href="#overview"><Gauge size={17} /> Overview</a>
           <a className="nav-item" href="#score"><Activity size={17} /> Transaction scoring</a>
           <a className="nav-item" href="#activity"><FileText size={17} /> Decision history</a>
-          <a className="nav-item disabled" href="#review" aria-disabled="true"><ShieldAlert size={17} /> Review queue <span className="soon">NEXT</span></a>
+          <a className="nav-item" href="#review"><ShieldAlert size={17} /> Review queue</a>
         </nav>
         <div className="sidebar-bottom">
           <div className="environment-card">
@@ -295,6 +359,47 @@ function App() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </section>
+
+        <section className="panel review-panel" id="review">
+          <div className="panel-heading">
+            <div><div className="section-kicker">HUMAN-IN-THE-LOOP</div><h2>Manual review queue</h2><p>Inspect REVIEW decisions and record a separate human outcome.</p></div>
+            <span className="panel-symbol"><ShieldAlert size={18} /></span>
+          </div>
+          <div className="review-access">
+            <label className="field"><span>Reviewer API key <em>held in memory only</em></span><input type="password" autoComplete="off" placeholder="Enter the server-configured reviewer key" value={reviewerKey} onChange={(e) => setReviewerKey(e.target.value)} /></label>
+            <button className="secondary-button" type="button" onClick={() => void loadReviewQueue()} disabled={reviewLoading || !reviewerKey.trim()}>{reviewLoading ? "Loading…" : "Load pending cases"}</button>
+          </div>
+          <p className="form-hint"><CircleHelp size={14} /> The key is sent only in the request header and is not saved in browser storage. Configure a local reviewer key on the API before using this workflow.</p>
+          {reviewError && <div className="notice error"><AlertCircle size={16} /><span>{reviewError}</span></div>}
+          {reviewNotice && <div className="notice success"><CheckCircle2 size={16} /><span>{reviewNotice}</span></div>}
+          {reviewCases.length === 0 ? (
+            <div className="history-empty">{reviewLoading ? "Loading review cases…" : "No pending cases loaded. Authenticate to retrieve the review queue."}</div>
+          ) : (
+            <div className="review-list">
+              {reviewCases.map((item) => (
+                <article className="review-card" key={item.case_id}>
+                  <div className="review-card-top">
+                    <div><span className="review-case-id">CASE #{item.case_id} · DECISION #{item.decision_id}</span><h3>{item.transaction_id}</h3><p>Automated outcome <span className="history-decision review">REVIEW</span></p></div>
+                    <div className="review-risk"><strong>{(item.risk_probability * 100).toFixed(2)}%</strong><small>CALIBRATED RISK</small></div>
+                  </div>
+                  <div className="review-details">
+                    <div><span>MODEL / POLICY</span><strong>{item.model_version} · {item.policy_version}</strong><small>{item.feature_version} · {item.scored_inputs.ProductCD ? String(item.scored_inputs.ProductCD) : "Product not supplied"}</small></div>
+                    <div><span>TRANSACTION AMOUNT</span><strong>{typeof item.scored_inputs.TransactionAmt === "number" ? `${item.scored_inputs.TransactionAmt.toFixed(2)}` : "Not supplied"}</strong><small>History rows used: recorded in audit decision</small></div>
+                  </div>
+                  <p className="review-explanation">{item.decision_explanation}</p>
+                  <div className="review-signals">
+                    {item.reason_codes.slice(0, 3).map((signal) => <span key={signal.code}>{signal.title}</span>)}
+                  </div>
+                  <label className="field review-comment"><span>Reviewer notes <em>optional</em></span><textarea rows={2} value={reviewComments[item.case_id] ?? ""} onChange={(e) => setReviewComments((current) => ({ ...current, [item.case_id]: e.target.value }))} placeholder="Record the evidence or rationale for this outcome…" /></label>
+                  <div className="review-actions">
+                    <button className="approve-button" type="button" disabled={reviewActionId !== null} onClick={() => void resolveCase(item.case_id, "APPROVED")}><CheckCircle2 size={15} /> Clear transaction</button>
+                    <button className="reject-button" type="button" disabled={reviewActionId !== null} onClick={() => void resolveCase(item.case_id, "REJECTED")}><Shield size={15} /> Confirm suspected fraud</button>
+                  </div>
+                </article>
+              ))}
             </div>
           )}
         </section>

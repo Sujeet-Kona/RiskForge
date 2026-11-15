@@ -1,4 +1,12 @@
-import type { ApiError, HealthResponse, ScoreRequest, ScoreResponse } from "./types";
+import type {
+  ApiError,
+  HealthResponse,
+  ReviewQueueResponse,
+  ReviewResolutionResponse,
+  ReviewOutcome,
+  ScoreRequest,
+  ScoreResponse,
+} from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -37,5 +45,24 @@ export function scoreTransaction(payload: ScoreRequest) {
   return request<ScoreResponse>("/v1/risk/score", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function getReviewQueue(apiKey: string) {
+  return request<ReviewQueueResponse>("/v1/reviews?status=PENDING", {
+    headers: { "X-Reviewer-API-Key": apiKey },
+  });
+}
+
+export function resolveReviewCase(
+  caseId: number,
+  apiKey: string,
+  outcome: ReviewOutcome,
+  comment: string,
+) {
+  return request<ReviewResolutionResponse>(`/v1/reviews/${caseId}/resolve`, {
+    method: "POST",
+    headers: { "X-Reviewer-API-Key": apiKey },
+    body: JSON.stringify({ outcome, comment: comment || null }),
   });
 }
