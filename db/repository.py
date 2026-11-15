@@ -17,12 +17,19 @@ import math
 import numbers
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from db.models import DECISION_VALUES, RiskDecision
+from db.models import (
+    DECISION_VALUES,
+    RiskDecision,
+    RiskReviewCase,
+    RiskReviewEvent,
+    RiskIdempotencyRecord,
+)
 from db.session import AuditDatabase
 
 
@@ -35,6 +42,18 @@ class AuditPersistenceError(RuntimeError):
     Carries no SQL, no connection string and no driver detail. The cause is
     logged server-side, and the caller turns this into a sanitized response.
     """
+
+
+class ReviewCaseNotFoundError(LookupError):
+    """The requested human-review case does not exist."""
+
+
+class ReviewConflictError(RuntimeError):
+    """A review case has already been resolved by another action."""
+
+
+class IdempotencyConflictError(RuntimeError):
+    """An idempotency key was reused for a different request body."""
 
 
 @dataclass(frozen=True)
@@ -64,6 +83,7 @@ class AuditRecord:
     top_k: int
     model_version: str
     feature_version: str
+    calibration_method: str
     policy_version: str
     feature_count: int
     history_transactions_used: int
@@ -102,14 +122,38 @@ class AuditRecord:
 
         _require_text(self.decision_explanation, "decision_explanation")
 
-        for name in ("model_version", "feature_version", "policy_version"):
+        for name in (
+            "model_version",
+            "feature_version",
+            "calibration_method",
+            "policy_version",
+        ):
             _require_text(getattr(self, name), name)
+        if self.calibration_method not in {"isotonic", "sigmoid", "unknown"}:
+            raise ValueError(
+                "calibration_method must be isotonic, sigmoid, or unknown."
+            )
 
         _require_count(self.top_k, "top_k", minimum=1)
         _require_count(self.feature_count, "feature_count", minimum=1)
         _require_count(
             self.history_transactions_used, "history_transactions_used", minimum=0
         )
+
+
+@dataclass(frozen=True)
+class ReviewCaseRecord:
+    """A review case joined to the immutable automated decision it resolves."""
+
+    id: int
+    decision_id: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    resolved_at: datetime | None
+    resolved_by: str | None
+    resolution_comment: str | None
+    decision: AuditRecord
 
 
 # The decision fields, which map one-to-one onto columns. Derived from the
@@ -134,6 +178,31 @@ class AuditStore(Protocol):
 
     def get_audit_record(self, decision_id: int) -> AuditRecord | None: ...
 
+    def list_audit_records(
+        self, *, limit: int, offset: int, decision: str | None = None
+    ) -> tuple[list[AuditRecord], int]: ...
+
+    def list_review_cases(
+        self, *, status: str | None, limit: int, offset: int
+    ) -> tuple[list[ReviewCaseRecord], int]: ...
+
+    def get_idempotency_record(
+        self, idempotency_key: str
+    ) -> tuple[str, dict[str, Any]] | None: ...
+
+    def create_idempotent_decision(
+        self,
+        record: AuditRecord,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+        response_body: dict[str, Any],
+    ) -> dict[str, Any]: ...
+
+    def resolve_review_case(
+        self, *, case_id: int, outcome: str, reviewer_id: str, comment: str | None
+    ) -> ReviewCaseRecord | None: ...
+
     def is_ready(self) -> bool: ...
 
 
@@ -151,6 +220,9 @@ class AuditRepository:
                     **{name: getattr(record, name) for name in AUDIT_RECORD_FIELDS}
                 )
                 session.add(row)
+                session.flush()
+                if record.decision == "REVIEW":
+                    session.add(RiskReviewCase(decision_id=int(row.id)))
                 session.commit()
 
                 return int(row.id)
@@ -177,6 +249,228 @@ class AuditRepository:
                 "The audit record could not be read from the audit store."
             ) from error
 
+    def list_audit_records(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        decision: str | None = None,
+    ) -> tuple[list[AuditRecord], int]:
+        """Return a newest-first page and the matching total count."""
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100.")
+        if offset < 0:
+            raise ValueError("offset must not be negative.")
+        if decision is not None and decision not in DECISION_VALUES:
+            raise ValueError(f"decision must be one of {sorted(DECISION_VALUES)}.")
+
+        try:
+            with self.database.session_factory() as session:
+                records_query = select(RiskDecision)
+                count_query = select(func.count()).select_from(RiskDecision)
+
+                if decision is not None:
+                    records_query = records_query.where(RiskDecision.decision == decision)
+                    count_query = count_query.where(RiskDecision.decision == decision)
+
+                rows = session.scalars(
+                    records_query
+                    .order_by(RiskDecision.created_at.desc(), RiskDecision.id.desc())
+                    .limit(limit)
+                    .offset(offset)
+                ).all()
+                total = int(session.scalar(count_query) or 0)
+
+                return [_to_record(row) for row in rows], total
+        except SQLAlchemyError as error:
+            logger.error("could not list audit records", exc_info=error)
+            raise AuditPersistenceError(
+                "The audit records could not be read from the audit store."
+            ) from error
+
+    def get_idempotency_record(
+        self,
+        idempotency_key: str,
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Return the request fingerprint and original response for a key."""
+        try:
+            with self.database.session_factory() as session:
+                row = session.get(RiskIdempotencyRecord, idempotency_key)
+                if row is None:
+                    return None
+                return row.request_hash, dict(row.response_body)
+        except SQLAlchemyError as error:
+            logger.error("could not read idempotency record", exc_info=error)
+            raise AuditPersistenceError(
+                "The idempotency record could not be read from the audit store."
+            ) from error
+
+    def create_idempotent_decision(
+        self,
+        record: AuditRecord,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+        response_body: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically persist a decision, optional review case and replay body."""
+        try:
+            with self.database.session_factory() as session:
+                existing = session.get(RiskIdempotencyRecord, idempotency_key)
+                if existing is not None:
+                    if existing.request_hash != request_hash:
+                        raise IdempotencyConflictError(
+                            "Idempotency-Key was already used for a different request."
+                        )
+                    return dict(existing.response_body)
+
+                row = RiskDecision(
+                    **{name: getattr(record, name) for name in AUDIT_RECORD_FIELDS}
+                )
+                session.add(row)
+                session.flush()
+                if record.decision == "REVIEW":
+                    session.add(RiskReviewCase(decision_id=int(row.id)))
+                session.add(
+                    RiskIdempotencyRecord(
+                        idempotency_key=idempotency_key,
+                        request_hash=request_hash,
+                        decision_id=int(row.id),
+                        response_body=response_body,
+                    )
+                )
+                session.commit()
+                return response_body
+        except IdempotencyConflictError:
+            raise
+        except IntegrityError as error:
+            # Two identical keys can arrive concurrently. The unique primary key
+            # elects one writer; the losing transaction is rolled back in full,
+            # then reads the winner's response in a fresh session.
+            try:
+                with self.database.session_factory() as session:
+                    existing = session.get(RiskIdempotencyRecord, idempotency_key)
+                    if existing is not None:
+                        if existing.request_hash != request_hash:
+                            raise IdempotencyConflictError(
+                                "Idempotency-Key was already used for a different request."
+                            )
+                        return dict(existing.response_body)
+            except IdempotencyConflictError:
+                raise
+            except SQLAlchemyError as read_error:
+                logger.error(
+                    "could not read concurrent idempotency winner",
+                    exc_info=read_error,
+                )
+            logger.error("could not persist idempotent decision", exc_info=error)
+            raise AuditPersistenceError(
+                "The idempotent risk decision could not be recorded."
+            ) from error
+        except SQLAlchemyError as error:
+            logger.error("could not persist idempotent decision", exc_info=error)
+            raise AuditPersistenceError(
+                "The idempotent risk decision could not be recorded."
+            ) from error
+
+    def list_review_cases(
+        self,
+        *,
+        status: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ReviewCaseRecord], int]:
+        """Return review cases joined to their original decision, newest first."""
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100.")
+        if offset < 0:
+            raise ValueError("offset must not be negative.")
+        if status is not None and status not in {"PENDING", "APPROVED", "REJECTED"}:
+            raise ValueError("status must be PENDING, APPROVED, or REJECTED.")
+
+        try:
+            with self.database.session_factory() as session:
+                query = select(RiskReviewCase, RiskDecision).join(
+                    RiskDecision,
+                    RiskReviewCase.decision_id == RiskDecision.id,
+                )
+                count_query = select(func.count()).select_from(RiskReviewCase)
+                if status is not None:
+                    query = query.where(RiskReviewCase.status == status)
+                    count_query = count_query.where(RiskReviewCase.status == status)
+
+                rows = session.execute(
+                    query.order_by(
+                        RiskReviewCase.created_at.desc(),
+                        RiskReviewCase.id.desc(),
+                    ).limit(limit).offset(offset)
+                ).all()
+                total = int(session.scalar(count_query) or 0)
+
+                return [
+                    _to_review_case(case, decision) for case, decision in rows
+                ], total
+        except SQLAlchemyError as error:
+            logger.error("could not list review cases", exc_info=error)
+            raise AuditPersistenceError(
+                "The review queue could not be read from the audit store."
+            ) from error
+
+    def resolve_review_case(
+        self,
+        *,
+        case_id: int,
+        outcome: str,
+        reviewer_id: str,
+        comment: str | None,
+    ) -> ReviewCaseRecord | None:
+        """Resolve a pending case under a row lock and append a review event."""
+        if outcome not in {"APPROVED", "REJECTED"}:
+            raise ValueError("outcome must be APPROVED or REJECTED.")
+        _require_text(reviewer_id, "reviewer_id")
+
+        try:
+            with self.database.session_factory() as session:
+                case = session.scalar(
+                    select(RiskReviewCase)
+                    .where(RiskReviewCase.id == case_id)
+                    .with_for_update()
+                )
+                if case is None:
+                    return None
+                if case.status != "PENDING":
+                    raise ReviewConflictError(
+                        f"Review case {case_id} has already been resolved."
+                    )
+
+                now = datetime.now(timezone.utc)
+                case.status = outcome
+                case.updated_at = now
+                case.resolved_at = now
+                case.resolved_by = reviewer_id
+                case.resolution_comment = comment
+                session.add(
+                    RiskReviewEvent(
+                        review_case_id=case.id,
+                        action=outcome,
+                        reviewer_id=reviewer_id,
+                        comment=comment,
+                    )
+                )
+                session.flush()
+                decision = session.get(RiskDecision, case.decision_id)
+                result = _to_review_case(case, decision)
+                session.commit()
+
+                return result
+        except ReviewConflictError:
+            raise
+        except SQLAlchemyError as error:
+            logger.error("could not resolve review case %s", case_id, exc_info=error)
+            raise AuditPersistenceError(
+                "The review action could not be recorded in the audit store."
+            ) from error
+
     def is_ready(self) -> bool:
         return self.database.is_ready()
 
@@ -186,6 +480,23 @@ def _to_record(row: RiskDecision) -> AuditRecord:
         **{name: getattr(row, name) for name in AUDIT_RECORD_FIELDS},
         id=int(row.id),
         created_at=row.created_at,
+    )
+
+
+def _to_review_case(
+    case: RiskReviewCase,
+    decision: RiskDecision,
+) -> ReviewCaseRecord:
+    return ReviewCaseRecord(
+        id=int(case.id),
+        decision_id=int(case.decision_id),
+        status=case.status,
+        created_at=case.created_at,
+        updated_at=case.updated_at,
+        resolved_at=case.resolved_at,
+        resolved_by=case.resolved_by,
+        resolution_comment=case.resolution_comment,
+        decision=_to_record(decision),
     )
 
 

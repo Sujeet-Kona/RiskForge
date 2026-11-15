@@ -14,15 +14,22 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from db.config import DatabaseConfig
-from db.models import AUDIT_TABLE_NAME, RiskDecision
+from db.models import (
+    AUDIT_TABLE_NAME,
+    RiskDecision,
+    RiskReviewEvent,
+    RiskIdempotencyRecord,
+)
 from db.repository import (
     AUDIT_RECORD_FIELDS,
     AuditPersistenceError,
     AuditRecord,
     AuditRepository,
+    ReviewConflictError,
+    IdempotencyConflictError,
 )
 from db.session import AuditDatabase
 
@@ -174,6 +181,98 @@ def test_the_same_transaction_identifier_may_be_recorded_twice(
     assert audit_repository.get_audit_record(second).decision == "BLOCK"
 
 
+def test_review_decision_creates_a_pending_case_and_can_be_resolved(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    decision_id = audit_repository.create_audit_record(audit_record)
+
+    cases, total = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+
+    assert total == 1
+    case = cases[0]
+    assert case.decision_id == decision_id
+    assert case.status == "PENDING"
+    assert case.decision.decision == "REVIEW"
+
+    resolved = audit_repository.resolve_review_case(
+        case_id=case.id,
+        outcome="APPROVED",
+        reviewer_id="reviewer-01",
+        comment="Manual review completed.",
+    )
+
+    assert resolved is not None
+    assert resolved.status == "APPROVED"
+    assert resolved.decision.decision == "REVIEW"
+    assert resolved.resolved_by == "reviewer-01"
+    assert resolved.resolution_comment == "Manual review completed."
+
+    with audit_repository.database.session_factory() as session:
+        event_total = session.query(RiskReviewEvent).filter_by(
+            review_case_id=case.id
+        ).count()
+    assert event_total == 1
+
+
+def test_a_review_case_cannot_be_resolved_twice(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+
+    audit_repository.resolve_review_case(
+        case_id=case_id,
+        outcome="REJECTED",
+        reviewer_id="reviewer-01",
+        comment=None,
+    )
+
+    with pytest.raises(ReviewConflictError):
+        audit_repository.resolve_review_case(
+            case_id=case_id,
+            outcome="APPROVED",
+            reviewer_id="reviewer-02",
+            comment=None,
+        )
+
+
+def test_review_events_are_database_enforced_append_only(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    audit_repository.resolve_review_case(
+        case_id=cases[0].id,
+        outcome="APPROVED",
+        reviewer_id="reviewer-01",
+        comment=None,
+    )
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            event = session.query(RiskReviewEvent).filter_by(
+                review_case_id=cases[0].id
+            ).one()
+            event.comment = "rewritten"
+            session.commit()
+
+
 def test_an_identifier_that_was_never_recorded_reads_back_as_none(
     audit_repository: AuditRepository
 ):
@@ -311,3 +410,118 @@ def test_the_driver_detail_is_kept_as_the_cause(audit_record: AuditRecord):
         repository.database.dispose()
 
     assert raised.value.__cause__ is not None
+
+
+
+def test_original_risk_decisions_are_database_enforced_append_only(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    decision_id = audit_repository.create_audit_record(audit_record)
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            decision = session.get(RiskDecision, decision_id)
+            decision.risk_probability = 0.5
+            session.commit()
+
+
+def test_a_resolved_review_case_cannot_return_to_pending(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+    audit_repository.resolve_review_case(
+        case_id=case_id,
+        outcome="APPROVED",
+        reviewer_id="reviewer-01",
+        comment=None,
+    )
+
+    from db.models import RiskReviewCase
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            case = session.get(RiskReviewCase, case_id)
+            case.status = "PENDING"
+            case.resolved_at = None
+            case.resolved_by = None
+            session.commit()
+
+
+
+def test_idempotency_replay_returns_the_original_response_without_a_second_row(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+    audit_database: AuditDatabase,
+):
+    first = audit_repository.create_idempotent_decision(
+        audit_record,
+        idempotency_key="riskforge-repo-key-0001",
+        request_hash="a" * 64,
+        response_body={"decision": "REVIEW", "risk_probability": 0.09},
+    )
+    replay = audit_repository.create_idempotent_decision(
+        audit_record,
+        idempotency_key="riskforge-repo-key-0001",
+        request_hash="a" * 64,
+        response_body={"decision": "REVIEW", "risk_probability": 0.09},
+    )
+
+    assert replay == first
+    assert audit_repository.get_idempotency_record("riskforge-repo-key-0001") == (
+        "a" * 64,
+        first,
+    )
+    with audit_database.engine.connect() as connection:
+        count = connection.execute(
+            text(f"SELECT COUNT(*) FROM {AUDIT_TABLE_NAME}")
+        ).scalar_one()
+    assert count == 1
+
+
+def test_idempotency_key_reuse_with_a_different_hash_conflicts(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_idempotent_decision(
+        audit_record,
+        idempotency_key="riskforge-repo-key-0002",
+        request_hash="a" * 64,
+        response_body={"decision": "REVIEW"},
+    )
+
+    with pytest.raises(IdempotencyConflictError):
+        audit_repository.create_idempotent_decision(
+            audit_record,
+            idempotency_key="riskforge-repo-key-0002",
+            request_hash="b" * 64,
+            response_body={"decision": "BLOCK"},
+        )
+
+
+def test_idempotency_records_are_database_enforced_append_only(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_idempotent_decision(
+        audit_record,
+        idempotency_key="riskforge-repo-key-0003",
+        request_hash="c" * 64,
+        response_body={"decision": "REVIEW"},
+    )
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            stored = session.get(
+                RiskIdempotencyRecord,
+                "riskforge-repo-key-0003",
+            )
+            stored.response_body = {"decision": "BLOCK"}
+            session.commit()

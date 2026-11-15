@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -351,22 +352,21 @@ def main() -> None:
         calibrated_test,
     )
 
-    print_calibration_metrics(
-        "RAW XGBOOST — TEST",
-        evaluate_calibration(
-            labels["TEST"],
-            raw["TEST"],
-            n_bins=RELIABILITY_BINS,
-        ),
+    raw_test_calibration = evaluate_calibration(
+        labels["TEST"],
+        raw["TEST"],
+        n_bins=RELIABILITY_BINS,
+    )
+    calibrated_test_calibration = evaluate_calibration(
+        labels["TEST"],
+        calibrated_test,
+        n_bins=RELIABILITY_BINS,
     )
 
+    print_calibration_metrics("RAW XGBOOST — TEST", raw_test_calibration)
     print_calibration_metrics(
         f"CALIBRATED {selected.upper()} — TEST",
-        evaluate_calibration(
-            labels["TEST"],
-            calibrated_test,
-            n_bins=RELIABILITY_BINS,
-        ),
+        calibrated_test_calibration,
     )
 
     print_ranking_metrics("RAW XGBOOST — TEST", raw_test_ranking)
@@ -392,6 +392,53 @@ def main() -> None:
     print(f"Raw TEST pr_auc now  : {raw_test_ranking.pr_auc:.6f}")
     print(f"Raw TEST roc_auc now : {raw_test_ranking.roc_auc:.6f}")
     print("Calibration must not move these raw values.")
+
+    brier_reduction = (
+        (raw_test_calibration.brier_score - calibrated_test_calibration.brier_score)
+        / raw_test_calibration.brier_score
+        if raw_test_calibration.brier_score > 0
+        else None
+    )
+    ece_reduction = (
+        (
+            raw_test_calibration.expected_calibration_error
+            - calibrated_test_calibration.expected_calibration_error
+        )
+        / raw_test_calibration.expected_calibration_error
+        if raw_test_calibration.expected_calibration_error > 0
+        else None
+    )
+    report = {
+        "selected_calibration_method": selected,
+        "selection_rule": SELECTION_RULE,
+        "reliability_bins": RELIABILITY_BINS,
+        "validation": {
+            "forward_chaining_oof_by_method": {
+                method: calibration_metrics_to_dict(selection[method]["metrics"])
+                for method in CALIBRATION_METHODS
+            },
+            "selected_oof_ranking": metrics_to_dict(oof_ranking),
+            "scored_rows": int(scored_rows.sum()),
+            "warmup_rows_excluded": int((~scored_rows).sum()),
+        },
+        "test": {
+            "raw_calibration": calibration_metrics_to_dict(raw_test_calibration),
+            "calibrated_calibration": calibration_metrics_to_dict(
+                calibrated_test_calibration
+            ),
+            "raw_ranking": metrics_to_dict(raw_test_ranking),
+            "calibrated_ranking": metrics_to_dict(calibrated_test_ranking),
+            "brier_relative_reduction": brier_reduction,
+            "ece_relative_reduction": ece_reduction,
+        },
+    }
+    report_path = Path("reports/calibration/evaluation_metrics.json")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"\nSaved reproducible calibration metrics to: {report_path}")
 
     print(f"\nTotal seconds: {time.perf_counter() - started:.2f}")
 

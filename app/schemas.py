@@ -15,6 +15,9 @@ as an imputed gap.
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import DEFAULT_TOP_K, MAX_HISTORY_TRANSACTIONS
@@ -201,9 +204,37 @@ class RiskScoreResponse(BaseModel):
     policy_detail: PolicyDetailOut
     model_version: str
     feature_version: str
+    calibration_method: str
     policy_version: str
     feature_count: int
     history_transactions_used: int
+
+
+class AuditDecisionSummaryOut(BaseModel):
+    """A safe, compact view of a persisted decision for the operations UI."""
+
+    model_config = STRICT
+
+    id: int | None = None
+    transaction_id: str
+    risk_probability: float
+    decision: str
+    model_version: str
+    feature_version: str
+    calibration_method: str
+    policy_version: str
+    created_at: datetime | None = None
+
+
+class AuditDecisionListResponse(BaseModel):
+    """A bounded page of persisted decisions and its filtered total."""
+
+    model_config = STRICT
+
+    items: list[AuditDecisionSummaryOut]
+    total: int
+    limit: int
+    offset: int
 
 
 class HealthResponse(BaseModel):
@@ -221,6 +252,7 @@ class HealthResponse(BaseModel):
     status: str
     model_version: str | None = None
     feature_version: str | None = None
+    calibration_method: str | None = None
     policy_version: str | None = None
     artifact: dict | None = None
     database: str | None = None
@@ -239,3 +271,57 @@ class ErrorResponse(BaseModel):
     model_config = STRICT
 
     error: ErrorOut
+
+
+
+class ReviewResolutionRequest(BaseModel):
+    """A reviewer outcome; it never overwrites the automated decision."""
+
+    model_config = STRICT
+
+    outcome: Literal["APPROVED", "REJECTED"]
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class ReviewCaseOut(BaseModel):
+    """The review state and the immutable model decision under investigation."""
+
+    model_config = STRICT
+
+    case_id: int
+    decision_id: int
+    status: Literal["PENDING", "APPROVED", "REJECTED"]
+    created_at: datetime
+    updated_at: datetime
+    resolved_at: datetime | None
+    resolved_by: str | None
+    resolution_comment: str | None
+    transaction_id: str
+    risk_probability: float
+    decision: Literal["ALLOW", "REVIEW", "BLOCK"]
+    reason_codes: list[ReasonCodeOut]
+    risk_decreasing_signals: list[ReasonCodeOut]
+    decision_reason_code: DecisionReasonCodeOut
+    decision_explanation: str
+    model_detail: ModelDetailOut
+    policy_detail: PolicyDetailOut
+    scored_inputs: dict
+    model_version: str
+    feature_version: str
+    calibration_method: str
+    policy_version: str
+
+
+class ReviewQueueResponse(BaseModel):
+    model_config = STRICT
+
+    items: list[ReviewCaseOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class ReviewResolutionResponse(BaseModel):
+    model_config = STRICT
+
+    case: ReviewCaseOut

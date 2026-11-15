@@ -11,7 +11,7 @@ Skipped, visibly, when no PostgreSQL is reachable locally. CI fails instead.
 
 from __future__ import annotations
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.reflection import Inspector
 
@@ -19,7 +19,13 @@ from alembic import command
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 
-from db.models import AUDIT_TABLE_NAME, RiskDecision
+from db.models import (
+    AUDIT_TABLE_NAME,
+    RiskDecision,
+    RiskReviewCase,
+    RiskReviewEvent,
+    RiskIdempotencyRecord,
+)
 
 
 def _inspector(engine: Engine) -> Inspector:
@@ -75,8 +81,51 @@ def test_the_migration_and_the_models_have_not_drifted_apart(alembic_config):
 # --- what the migration builds ------------------------------------------------
 
 
-def test_the_migration_creates_the_audit_table(audit_database):
-    assert _user_tables(audit_database.engine) == {AUDIT_TABLE_NAME}
+def test_the_migration_creates_the_audit_and_review_tables(audit_database):
+    assert _user_tables(audit_database.engine) == {
+        AUDIT_TABLE_NAME,
+        "risk_review_cases",
+        "risk_review_events",
+        "risk_idempotency_records",
+    }
+
+
+def test_review_tables_have_exactly_the_modeled_columns(audit_database):
+    inspector = _inspector(audit_database.engine)
+    for table, model in (
+        ("risk_review_cases", RiskReviewCase),
+        ("risk_review_events", RiskReviewEvent),
+        ("risk_idempotency_records", RiskIdempotencyRecord),
+    ):
+        columns = inspector.get_columns(table)
+        assert {column["name"] for column in columns} == {
+            column.name for column in model.__table__.columns
+        }
+
+
+def test_postgres_enforces_append_only_decision_and_review_event_tables(audit_database):
+    from sqlalchemy import text
+
+    with audit_database.engine.connect() as connection:
+        triggers = set(
+            connection.execute(
+                text(
+                    "SELECT tgname FROM pg_trigger "
+                    "WHERE NOT tgisinternal AND tgname IN "
+                    "('trg_risk_decisions_append_only', "
+                    "'trg_risk_review_events_append_only', "
+                    "'trg_risk_review_cases_one_way', "
+                    "'trg_risk_idempotency_records_append_only')"
+                )
+            ).scalars()
+        )
+
+    assert triggers == {
+        "trg_risk_decisions_append_only",
+        "trg_risk_review_events_append_only",
+        "trg_risk_review_cases_one_way",
+        "trg_risk_idempotency_records_append_only",
+    }
 
 
 def test_the_table_has_exactly_the_modeled_columns(audit_database):
@@ -168,6 +217,7 @@ def test_the_migration_creates_every_check_constraint(audit_database):
     assert reflected == {
         "ck_risk_decisions_risk_probability_in_unit_interval",
         "ck_risk_decisions_decision_is_a_policy_outcome",
+        "ck_risk_decisions_calibration_method_is_supported",
         "ck_risk_decisions_feature_count_is_positive",
         "ck_risk_decisions_history_used_is_not_negative",
         "ck_risk_decisions_top_k_is_positive",
@@ -207,3 +257,55 @@ def test_a_full_downgrade_upgrade_cycle_rebuilds_the_same_schema(
     finally:
         if AUDIT_TABLE_NAME not in _user_tables(audit_database.engine):
             command.upgrade(alembic_config, "head")
+
+
+
+def test_existing_review_decisions_are_backfilled_and_old_calibration_is_unknown(
+    audit_database, alembic_config
+):
+    """Upgrading a database with prior audit rows preserves REVIEW work."""
+    command.downgrade(alembic_config, "7eccd8f63a8c")
+    with audit_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO risk_decisions (
+                    transaction_id, risk_probability, decision, reason_codes,
+                    risk_decreasing_signals, decision_reason_code,
+                    decision_explanation, model_detail, policy_detail,
+                    scored_inputs, top_k, model_version, feature_version,
+                    policy_version, feature_count, history_transactions_used
+                ) VALUES (
+                    'legacy-review', 0.09, 'REVIEW', '[]'::jsonb, '[]'::jsonb,
+                    '{}'::jsonb, 'legacy decision', '{}'::jsonb, '{}'::jsonb,
+                    '{}'::jsonb, 3, 'xgb-001', 'behavioral-v1',
+                    'policy-001', 28, 0
+                )
+                """
+            )
+        )
+
+    command.upgrade(alembic_config, "head")
+
+    with audit_database.engine.connect() as connection:
+        row = connection.execute(
+            text(
+                """
+                SELECT review.status, decision.calibration_method
+                FROM risk_review_cases AS review
+                JOIN risk_decisions AS decision ON decision.id = review.decision_id
+                WHERE decision.transaction_id = 'legacy-review'
+                """
+            )
+        ).one()
+
+    assert row.status == "PENDING"
+    assert row.calibration_method == "unknown"
+
+    with audit_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "TRUNCATE TABLE risk_idempotency_records, risk_review_events, "
+                "risk_review_cases, risk_decisions RESTART IDENTITY"
+            )
+        )

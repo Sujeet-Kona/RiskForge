@@ -1,6 +1,6 @@
 """The RiskForge inference application.
 
-Two endpoints, one scoring path:
+Scoring, audit-history, and review endpoints over one scoring path:
 
 ``GET /health``
     Liveness, the identity of the loaded artifact, and whether the audit store is
@@ -20,17 +20,26 @@ decision that cannot be recorded is not returned — see :mod:`app.audit`.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import re
+from typing import Literal
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.audit import (
     AUDIT_UNAVAILABLE_MESSAGE,
     AuditUnavailableError,
+    list_decisions,
+    list_review_cases,
+    get_idempotency_response,
+    record_idempotent_decision,
     record_decision,
+    resolve_review_case,
 )
 from app.config import DEFAULT_ARTIFACT_PATH, HISTORY_NOTE
 from app.dependencies import (
@@ -40,16 +49,30 @@ from app.dependencies import (
     get_service,
     load_service,
     release_resources,
+    require_reviewer,
 )
 from app.schemas import (
+    AuditDecisionListResponse,
+    AuditDecisionSummaryOut,
     ErrorOut,
     ErrorResponse,
     HealthResponse,
+    ReviewCaseOut,
+    ReviewQueueResponse,
+    ReviewResolutionRequest,
+    ReviewResolutionResponse,
     RiskScoreRequest,
     RiskScoreResponse,
 )
 from app.service import RiskScoringService, to_response
-from db.repository import AuditStore
+from db.repository import (
+    AuditStore,
+    IdempotencyConflictError,
+    ReviewCaseNotFoundError,
+    ReviewCaseRecord,
+    ReviewConflictError,
+)
+from policy.decision import Decision
 
 
 logger = logging.getLogger("riskforge.serving")
@@ -59,6 +82,7 @@ API_VERSION = "phase-7"
 
 HEALTH_ROUTE = "/health"
 SCORE_ROUTE = "/v1/risk/score"
+AUDIT_ROUTE = "/v1/audit/decisions"
 
 DATABASE_READY = "ready"
 DATABASE_UNAVAILABLE = "unavailable"
@@ -142,6 +166,7 @@ def create_app(
             status="ok",
             model_version=artifact.model_version,
             feature_version=artifact.feature_version,
+            calibration_method=artifact.calibration_method,
             policy_version=service.policy.config.policy_version,
             artifact=artifact.describe(),
             database=database,
@@ -150,6 +175,12 @@ def create_app(
     @application.post(SCORE_ROUTE, response_model=RiskScoreResponse)
     def score(
         payload: RiskScoreRequest,
+        idempotency_key: str | None = Header(
+            default=None,
+            alias="Idempotency-Key",
+            min_length=8,
+            max_length=128,
+        ),
         service: RiskScoringService = Depends(get_service),
         audit: AuditStore = Depends(get_audit_store),
     ) -> RiskScoreResponse:
@@ -159,11 +190,142 @@ def create_app(
         is returned, and it cannot change that decision: nothing on the audit path
         is an input to the model, the calibration or the policy.
         """
+        request_hash: str | None = None
+        if idempotency_key is not None:
+            if re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", idempotency_key) is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Idempotency-Key may contain only letters, digits, '.', '_', ':', and '-'.",
+                )
+            canonical_request = json.dumps(
+                payload.model_dump(mode="json"),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            request_hash = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+            try:
+                cached = get_idempotency_response(
+                    audit,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                )
+            except IdempotencyConflictError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key was already used for a different request.",
+                ) from error
+            if cached is not None:
+                return RiskScoreResponse.model_validate(cached)
+
         response = to_response(service.score(payload))
+
+        if idempotency_key is not None and request_hash is not None:
+            try:
+                stored = record_idempotent_decision(
+                    audit,
+                    payload,
+                    response,
+                    idempotency_key=idempotency_key,
+                    request_hash=request_hash,
+                )
+            except IdempotencyConflictError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key was already used for a different request.",
+                ) from error
+            return RiskScoreResponse.model_validate(stored)
 
         record_decision(audit, payload, response)
 
         return response
+
+    @application.get(AUDIT_ROUTE, response_model=AuditDecisionListResponse)
+    def decision_history(
+        limit: int = Query(default=25, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        decision: Decision | None = None,
+        audit: AuditStore = Depends(get_audit_store),
+    ) -> AuditDecisionListResponse:
+        """Return a bounded, newest-first page of recorded decisions."""
+        records, total = list_decisions(
+            audit,
+            limit=limit,
+            offset=offset,
+            decision=None if decision is None else decision.value,
+        )
+        return AuditDecisionListResponse(
+            items=[
+                AuditDecisionSummaryOut(
+                    id=record.id,
+                    transaction_id=record.transaction_id,
+                    risk_probability=record.risk_probability,
+                    decision=record.decision,
+                    model_version=record.model_version,
+                    feature_version=record.feature_version,
+                    calibration_method=record.calibration_method,
+                    policy_version=record.policy_version,
+                    created_at=record.created_at,
+                )
+                for record in records
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    @application.get("/v1/reviews", response_model=ReviewQueueResponse)
+    def review_queue(
+        status: Literal["PENDING", "APPROVED", "REJECTED"] | None = Query(
+            default="PENDING"
+        ),
+        limit: int = Query(default=25, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        reviewer_id: str = Depends(require_reviewer),
+        audit: AuditStore = Depends(get_audit_store),
+    ) -> ReviewQueueResponse:
+        """Return the authenticated review queue and original model decisions."""
+        cases, total = list_review_cases(
+            audit,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+        return ReviewQueueResponse(
+            items=[_review_case_out(case) for case in cases],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    @application.post(
+        "/v1/reviews/{case_id}/resolve",
+        response_model=ReviewResolutionResponse,
+    )
+    def resolve_review(
+        case_id: int,
+        payload: ReviewResolutionRequest,
+        reviewer_id: str = Depends(require_reviewer),
+        audit: AuditStore = Depends(get_audit_store),
+    ) -> ReviewResolutionResponse:
+        """Resolve one pending review without changing its automated decision."""
+        try:
+            case = resolve_review_case(
+                audit,
+                case_id=case_id,
+                outcome=payload.outcome,
+                reviewer_id=reviewer_id,
+                comment=payload.comment,
+            )
+        except ReviewCaseNotFoundError as error:
+            raise HTTPException(status_code=404, detail="Review case not found.") from error
+        except ReviewConflictError as error:
+            raise HTTPException(
+                status_code=409,
+                detail="This review case has already been resolved.",
+            ) from error
+
+        return ReviewResolutionResponse(case=_review_case_out(case))
 
     @application.exception_handler(ArtifactUnavailableError)
     async def artifact_unavailable(
@@ -222,6 +384,35 @@ def create_app(
         )
 
     return application
+
+
+def _review_case_out(case: ReviewCaseRecord) -> ReviewCaseOut:
+    """Render review state alongside the original immutable scoring record."""
+    decision = case.decision
+    return ReviewCaseOut(
+        case_id=case.id,
+        decision_id=case.decision_id,
+        status=case.status,
+        created_at=case.created_at,
+        updated_at=case.updated_at,
+        resolved_at=case.resolved_at,
+        resolved_by=case.resolved_by,
+        resolution_comment=case.resolution_comment,
+        transaction_id=decision.transaction_id,
+        risk_probability=decision.risk_probability,
+        decision=decision.decision,
+        reason_codes=decision.reason_codes,
+        risk_decreasing_signals=decision.risk_decreasing_signals,
+        decision_reason_code=decision.decision_reason_code,
+        decision_explanation=decision.decision_explanation,
+        model_detail=decision.model_detail,
+        policy_detail=decision.policy_detail,
+        scored_inputs=decision.scored_inputs,
+        model_version=decision.model_version,
+        feature_version=decision.feature_version,
+        calibration_method=decision.calibration_method,
+        policy_version=decision.policy_version,
+    )
 
 
 def _error_response(*, status_code: int, code: str, message: str) -> JSONResponse:

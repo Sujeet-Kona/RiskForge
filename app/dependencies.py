@@ -18,11 +18,13 @@ parity check, with no database in sight.
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import Request
+from fastapi import Header, HTTPException, Request
 
 from app.service import RiskScoringService
 from db.config import DatabaseConfig
@@ -128,3 +130,32 @@ def get_audit_store(request: Request) -> AuditStore:
     startup: StartupResult = request.app.state.startup
 
     return startup.audit
+
+
+
+def require_reviewer(
+    x_reviewer_api_key: str | None = Header(
+        default=None,
+        alias="X-Reviewer-API-Key",
+    ),
+) -> str:
+    """Authenticate the single configured local reviewer without logging secrets."""
+    expected_key = os.environ.get("RISKFORGE_REVIEWER_API_KEY", "")
+    reviewer_id = os.environ.get("RISKFORGE_REVIEWER_ID", "").strip()
+
+    if not expected_key or not reviewer_id or len(reviewer_id) > 64:
+        raise HTTPException(
+            status_code=503,
+            detail="Human-review operations are disabled until reviewer credentials are configured.",
+        )
+
+    if x_reviewer_api_key is None or not hmac.compare_digest(
+        x_reviewer_api_key,
+        expected_key,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Valid reviewer credentials are required.",
+        )
+
+    return reviewer_id

@@ -55,6 +55,7 @@ class RiskAssessment:
     history_transactions_used: int
     model_version: str
     feature_version: str
+    calibration_method: str
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,7 @@ class RiskScoringService:
             history_transactions_used=len(request.history),
             model_version=self.artifact.model_version,
             feature_version=self.artifact.feature_version,
+            calibration_method=self.artifact.calibration_method,
         )
 
 
@@ -153,6 +155,7 @@ def to_response(assessment: RiskAssessment) -> RiskScoreResponse:
         ),
         model_version=assessment.model_version,
         feature_version=assessment.feature_version,
+        calibration_method=assessment.calibration_method,
         policy_version=decision.policy_version,
         feature_count=len(MODEL_FEATURES),
         history_transactions_used=assessment.history_transactions_used,

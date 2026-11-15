@@ -23,7 +23,7 @@ from sqlalchemy import text
 
 from app.audit import AUDIT_UNAVAILABLE, AUDIT_UNAVAILABLE_MESSAGE
 from app.config import DEFAULT_TOP_K
-from app.main import SCORE_ROUTE, create_app
+from app.main import AUDIT_ROUTE, SCORE_ROUTE, create_app
 from app.schemas import RiskScoreResponse
 from db.config import DatabaseConfig
 from db.models import AUDIT_TABLE_NAME
@@ -91,6 +91,7 @@ def test_every_reported_value_is_the_value_that_was_recorded(
     assert record.policy_detail == body["policy_detail"]
     assert record.model_version == body["model_version"]
     assert record.feature_version == body["feature_version"]
+    assert record.calibration_method == body["calibration_method"]
     assert record.policy_version == body["policy_version"]
     assert record.feature_count == body["feature_count"]
     assert record.history_transactions_used == body["history_transactions_used"]
@@ -172,6 +173,66 @@ def test_nothing_is_recorded_for_a_request_that_was_rejected(
     assert audit_store.records == []
 
 
+# --- read-only decision history -----------------------------------------------
+
+
+def test_decision_history_returns_newest_first_page_and_total(
+    client, audit_store, score_payload
+):
+    first = _score(client, score_payload)
+    second_payload = {
+        **score_payload,
+        "transaction": {
+            **score_payload["transaction"],
+            "TransactionID": "RF-HISTORY-SECOND",
+        },
+    }
+    second = _score(client, second_payload)
+
+    response = client.get(AUDIT_ROUTE, params={"limit": 1, "offset": 0})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    assert body["limit"] == 1
+    assert body["offset"] == 0
+    assert len(body["items"]) == 1
+    assert body["items"][0]["transaction_id"] == second["transaction_id"]
+    assert body["items"][0]["decision"] == second["decision"]
+    assert body["items"][0]["risk_probability"] == second["risk_probability"]
+    assert body["items"][0]["model_version"] == "xgb-001"
+    assert body["items"][0]["feature_version"] == "behavioral-v1"
+    assert body["items"][0]["calibration_method"] == "isotonic"
+    assert body["items"][0]["policy_version"] == "policy-001"
+    assert first["transaction_id"] != second["transaction_id"]
+
+
+def test_decision_history_filters_by_policy_outcome(client, score_payload):
+    scored = _score(client, score_payload)
+
+    response = client.get(
+        AUDIT_ROUTE,
+        params={"decision": scored["decision"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["decision"] == scored["decision"]
+
+
+def test_decision_history_rejects_unknown_outcome(client):
+    response = client.get(AUDIT_ROUTE, params={"decision": "DECLINE"})
+
+    assert response.status_code == 422
+
+
+def test_decision_history_bounds_page_size(client):
+    assert client.get(AUDIT_ROUTE, params={"limit": 101}).status_code == 422
+    assert client.get(AUDIT_ROUTE, params={"limit": 0}).status_code == 422
+    assert client.get(AUDIT_ROUTE, params={"offset": -1}).status_code == 422
+
+
 # --- a decision that cannot be audited is not returned ------------------------
 
 
@@ -247,6 +308,162 @@ def test_a_recovered_audit_store_scores_again(client, audit_store, score_payload
     assert len(audit_store.records) == 1
 
 
+# --- idempotent scoring retries ----------------------------------------------
+
+
+def test_same_idempotency_key_and_payload_replay_the_original_response(
+    client, audit_store, score_payload
+):
+    headers = {"Idempotency-Key": "riskforge-request-0001"}
+    first = client.post(SCORE_ROUTE, json=score_payload, headers=headers)
+    second = client.post(SCORE_ROUTE, json=score_payload, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert len(audit_store.records) == 1
+    assert len(audit_store.idempotency_records) == 1
+
+
+def test_reusing_an_idempotency_key_for_a_different_payload_conflicts(
+    client, audit_store, score_payload
+):
+    headers = {"Idempotency-Key": "riskforge-request-0002"}
+    first = client.post(SCORE_ROUTE, json=score_payload, headers=headers)
+    changed = {
+        **score_payload,
+        "transaction": {
+            **score_payload["transaction"],
+            "TransactionAmt": score_payload["transaction"]["TransactionAmt"] + 1.0,
+        },
+    }
+
+    conflict = client.post(SCORE_ROUTE, json=changed, headers=headers)
+
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+    assert len(audit_store.records) == 1
+
+
+def test_malformed_idempotency_key_is_rejected(client, score_payload):
+    response = client.post(
+        SCORE_ROUTE,
+        json=score_payload,
+        headers={"Idempotency-Key": "bad key"},
+    )
+
+    assert response.status_code == 422
+
+
+# --- human review is separate from the automated decision --------------------
+
+
+def test_only_review_decisions_create_review_cases(audit_store, audit_record):
+    audit_store.create_audit_record(audit_record)
+    assert len(audit_store.review_cases) == 1
+    assert audit_store.review_cases[0].status == "PENDING"
+    assert audit_store.review_cases[0].decision.decision == "REVIEW"
+
+    allowed = dataclasses.replace(audit_record, decision="ALLOW")
+    audit_store.create_audit_record(allowed)
+    assert len(audit_store.review_cases) == 1
+
+
+def test_review_queue_requires_configured_reviewer_credentials(
+    client, audit_store, audit_record, monkeypatch
+):
+    audit_store.create_audit_record(audit_record)
+    monkeypatch.delenv("RISKFORGE_REVIEWER_API_KEY", raising=False)
+    monkeypatch.delenv("RISKFORGE_REVIEWER_ID", raising=False)
+
+    response = client.get("/v1/reviews")
+
+    assert response.status_code == 503
+
+
+def test_review_queue_rejects_an_invalid_reviewer_key(
+    client, audit_store, audit_record, monkeypatch
+):
+    audit_store.create_audit_record(audit_record)
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "correct-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+
+    response = client.get(
+        "/v1/reviews",
+        headers={"X-Reviewer-API-Key": "wrong-key"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_authenticated_review_queue_returns_original_decision(
+    client, audit_store, audit_record, monkeypatch
+):
+    audit_store.create_audit_record(audit_record)
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "test-review-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+
+    response = client.get(
+        "/v1/reviews",
+        headers={"X-Reviewer-API-Key": "test-review-key"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    case = body["items"][0]
+    assert case["status"] == "PENDING"
+    assert case["decision"] == "REVIEW"
+    assert case["transaction_id"] == audit_record.transaction_id
+    assert case["model_version"] == audit_record.model_version
+    assert case["calibration_method"] == audit_record.calibration_method
+    assert case["reason_codes"] == audit_record.reason_codes
+
+
+def test_reviewer_resolution_is_recorded_without_rewriting_model_decision(
+    client, audit_store, audit_record, monkeypatch
+):
+    audit_store.create_audit_record(audit_record)
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "test-review-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+    headers = {"X-Reviewer-API-Key": "test-review-key"}
+
+    response = client.post(
+        "/v1/reviews/1/resolve",
+        headers=headers,
+        json={"outcome": "APPROVED", "comment": "Reviewed supporting context."},
+    )
+
+    assert response.status_code == 200
+    case = response.json()["case"]
+    assert case["status"] == "APPROVED"
+    assert case["decision"] == "REVIEW"
+    assert case["resolved_by"] == "reviewer-01"
+    assert case["resolution_comment"] == "Reviewed supporting context."
+    assert len(audit_store.review_events) == 1
+    assert audit_store.review_events[0]["action"] == "APPROVED"
+
+    duplicate = client.post(
+        "/v1/reviews/1/resolve",
+        headers=headers,
+        json={"outcome": "REJECTED"},
+    )
+    assert duplicate.status_code == 409
+
+
+def test_review_resolution_rejects_missing_cases(client, monkeypatch):
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "test-review-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+
+    response = client.post(
+        "/v1/reviews/999/resolve",
+        headers={"X-Reviewer-API-Key": "test-review-key"},
+        json={"outcome": "REJECTED"},
+    )
+
+    assert response.status_code == 404
+
+
 # --- readiness is reported without changing liveness --------------------------
 
 
@@ -254,6 +471,7 @@ def test_health_reports_a_ready_audit_store(client):
     body = client.get("/health").json()
 
     assert body["status"] == "ok"
+    assert body["calibration_method"] == "isotonic"
     assert body["database"] == "ready"
 
 
@@ -316,6 +534,48 @@ def test_scoring_the_same_transaction_twice_records_both_decisions(
         ).scalar_one()
 
     assert count == 2
+
+
+def test_postgres_idempotency_replays_without_a_second_decision(
+    persisted_client, audit_repository, score_payload
+):
+    headers = {"Idempotency-Key": "riskforge-postgres-0001"}
+    first = _score_with_headers(persisted_client, score_payload, headers)
+    second_response = persisted_client.post(SCORE_ROUTE, json=score_payload, headers=headers)
+
+    assert second_response.status_code == 200
+    assert second_response.json() == first
+    with audit_repository.database.engine.connect() as connection:
+        decision_count = connection.execute(
+            text(f"SELECT COUNT(*) FROM {AUDIT_TABLE_NAME}")
+        ).scalar_one()
+        idempotency_count = connection.execute(
+            text("SELECT COUNT(*) FROM risk_idempotency_records")
+        ).scalar_one()
+    assert decision_count == 1
+    assert idempotency_count == 1
+
+
+def _score_with_headers(client: TestClient, payload: dict, headers: dict) -> dict:
+    response = client.post(SCORE_ROUTE, json=payload, headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_decision_history_reads_persisted_postgres_rows(
+    persisted_client, score_payload
+):
+    scored = _score(persisted_client, score_payload)
+
+    response = persisted_client.get(AUDIT_ROUTE, params={"decision": scored["decision"]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    item = body["items"][0]
+    assert item["id"] is not None
+    assert item["transaction_id"] == scored["transaction_id"]
+    assert item["created_at"] is not None
 
 
 def test_the_database_reports_itself_ready_through_health(persisted_client):

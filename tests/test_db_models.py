@@ -38,6 +38,7 @@ REQUIRED_AUDIT_FIELDS = {
     "decision_explanation",
     "model_version",
     "feature_version",
+    "calibration_method",
     "policy_version",
     "feature_count",
     "history_transactions_used",
@@ -119,6 +120,7 @@ def test_the_decision_vocabulary_comes_from_the_policy_enum():
     [
         ("risk_probability_in_unit_interval", "risk_probability"),
         ("decision_is_a_policy_outcome", "decision"),
+        ("calibration_method_is_supported", "calibration_method"),
         ("feature_count_is_positive", "feature_count"),
         ("history_used_is_not_negative", "history_transactions_used"),
         ("top_k_is_positive", "top_k"),
@@ -204,7 +206,7 @@ def test_a_probability_that_is_not_a_real_number_is_rejected(
 
 
 @pytest.mark.parametrize(
-    "field_name", ["model_version", "feature_version", "policy_version"]
+    "field_name", ["model_version", "feature_version", "calibration_method", "policy_version"]
 )
 @pytest.mark.parametrize("value", ["", "   ", None])
 def test_a_missing_version_identifier_is_rejected(

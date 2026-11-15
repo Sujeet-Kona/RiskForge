@@ -18,7 +18,7 @@ RiskForge uses the public IEEE-CIS Fraud Detection dataset to build point-in-tim
 | Model feature contract | 28 features: 13 behavioral, 4 categorical, 11 C/D |
 | Temporal partitions | 414,446 train / 88,013 validation / 88,081 test |
 | Selected estimator | XGBoost |
-| Calibration | Isotonic regression selected using forward-chaining validation |
+| Calibration | Isotonic regression selected using forward-chaining validation; method persisted with each decision |
 | Test Average Precision | 0.449254 raw / 0.438919 calibrated |
 | Test ROC-AUC | 0.865318 raw / 0.864850 calibrated |
 | Decision outputs | ALLOW / REVIEW / BLOCK |
@@ -52,6 +52,10 @@ flowchart TB
     POLICY --> AUDIT[(PostgreSQL decision record)]
     SHAP --> AUDIT
     AUDIT --> RESPONSE[Scoring response]
+    AUDIT -->|REVIEW only| CASE[(Review case)]
+    CASE --> REVIEWER[Authenticated reviewer]
+    REVIEWER --> EVENTS[(Append-only review event)]
+    AUDIT --> IDEMPOTENCY[(Idempotency response record)]
   end
   ARTIFACT -. loaded at startup .-> SCORE
   ARTIFACT -. calibrator .-> CALIBRATE
@@ -61,6 +65,7 @@ flowchart TB
 
 - Offline feature generation and online scoring use the same behavioral feature implementation.
 - The API loads a frozen local artifact at startup; it does not train a fallback model during requests.
+- Each scoring response, decision-history row, and review case records the artifact's calibration method alongside model, feature-contract, and policy identifiers.
 - Prior transaction history is supplied by the caller. PostgreSQL stores decisions but is not used as a feature-history store.
 - TreeSHAP model signals and policy-threshold explanations are separate outputs.
 - MLflow is used for offline experiment tracking only; it is not called in the inference path.
@@ -167,13 +172,83 @@ Policy research used synthetic assumptions: missed-fraud cost 100 units, false-d
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | /health | Service, artifact identity, and database readiness |
-| POST | /v1/risk/score | Score one transaction using caller-supplied prior history |
+| POST | /v1/risk/score | Score one transaction using caller-supplied prior history; optional `Idempotency-Key` supports safe retries |
+| GET | /v1/audit/decisions | Paginated, newest-first decision history; optional ALLOW/REVIEW/BLOCK filter |
+| GET | /v1/reviews | Authenticated pending review queue |
+| POST | /v1/reviews/{case_id}/resolve | Record an APPROVED or REJECTED human outcome without rewriting the model decision |
 
 The request includes the current transaction and a history array. History timestamps must be strictly earlier than the current transaction; same-timestamp and future records are rejected. Only the trailing 24 hours affect behavioral features. The API accepts at most 2,000 history records and rejects larger requests rather than truncating them. top_k controls returned reason signals (default 3).
 
-The service loads a local artifact identified as xgb-001 / behavioral-v1. It contains preprocessing, XGBoost, the isotonic calibrator, and feature/model/policy metadata. A scoring request validates input, builds the 28-feature row, scores and calibrates it, applies policy-001, creates TreeSHAP and policy explanations, and persists the decision to PostgreSQL before returning success. Missing or incompatible artifacts fail closed; audit-write failure prevents a successful response.
+The service loads a local artifact identified as xgb-001 / behavioral-v1. It contains preprocessing, XGBoost, the isotonic calibrator, and feature/model/policy metadata. A scoring request validates input, builds the 28-feature row, scores and calibrates it, applies policy-001, creates TreeSHAP and policy explanations, and persists the decision to PostgreSQL before returning success. REVIEW decisions also create a separate pending review case in the same database transaction. Missing or incompatible artifacts fail closed; audit-write failure prevents a successful response.
+
+### Idempotency
+
+The scoring endpoint accepts an optional `Idempotency-Key` header (8–128
+characters from letters, digits, `.`, `_`, `:`, and `-`). RiskForge hashes
+the canonical validated request body. Repeating the same key with the same
+request returns the original stored response without creating a second decision.
+Reusing that key for a different request returns HTTP 409. The decision, any
+REVIEW case, and the response snapshot are committed in one PostgreSQL
+transaction; a concurrent duplicate is resolved by the unique key constraint.
+
+Keys are global to this single-operator prototype and retained indefinitely.
+A production multi-tenant service would scope keys to an authenticated tenant
+and define an explicit retention/expiry policy.
+
+### Human review
+
+A reviewer queue is available for automated REVIEW decisions. Configure
+`RISKFORGE_REVIEWER_API_KEY` and `RISKFORGE_REVIEWER_ID` in the API environment.
+The API requires the key in the `X-Reviewer-API-Key` header for queue reads and
+resolution actions. This is a deliberately small, single-reviewer local demo
+credential, not a multi-user identity provider.
+
+A reviewer may mark a case APPROVED or REJECTED once, with an optional comment.
+The automated decision remains REVIEW in the original decision record. The
+mutable review-case state and append-only review event are stored separately.
+PostgreSQL triggers reject UPDATE/DELETE against the original risk decision and
+review-event tables; they do not make the database tamper-proof against a
+database administrator.
+
+Run the API with the local environment file loaded when using these settings:
+
+```bash
+set -a
+source .env
+set +a
+uvicorn app.main:app --reload
+```
+
 
 TreeSHAP contributions are calculated on the raw XGBoost output margin (log-odds) and mapped back to the original 28 contract features. They are local model signals, not causal explanations, and are not calibrated-probability contributions. The policy explanation separately identifies the probability threshold band that produced the action.
+
+## Local dashboard
+
+A React + TypeScript dashboard is available under `frontend/`. It reads
+`GET /health` and submits transactions to the existing
+`POST /v1/risk/score` endpoint. It displays the calibrated probability, the
+policy decision, TreeSHAP reason signals, risk-reducing signals, and artifact
+version identifiers. The browser does not reimplement feature construction,
+calibration, explainability, or policy logic.
+
+After starting PostgreSQL, building the serving artifact, and starting FastAPI
+as described in [Run locally](#run-locally), start the dashboard in another
+terminal:
+
+```bash
+cd frontend
+cp .env.example .env
+npm install
+npm run dev
+```
+
+Open http://127.0.0.1:5173. The Vite development proxy forwards `/api` requests
+to FastAPI at http://127.0.0.1:8000 by default. See
+[frontend setup](frontend/README.md) for configuration and deployment boundaries.
+
+The dashboard supports live scoring, result inspection, persisted decision
+history, and an authenticated manual-review queue. The UI does not display
+fabricated history or operational metrics.
 
 ## Verification
 
@@ -224,6 +299,9 @@ PYTHONPATH=. python scripts/run_model_benchmark.py
 Start the API:
 
 ~~~bash
+set -a
+source .env
+set +a
 uvicorn app.main:app --reload
 ~~~
 
@@ -232,7 +310,8 @@ Open http://127.0.0.1:8000/docs for the local API schema. The API does not train
 ## Repository map
 
 - app/ — FastAPI schemas, lifecycle, feature construction, and scoring.
-- db/ and alembic/ — PostgreSQL models, audit persistence, and migrations.
+- frontend/ — React + TypeScript scoring dashboard and local API proxy.
+- db/ and alembic/ — PostgreSQL models, decision audit persistence, review cases/events, and migrations.
 - ml/ — data contract, temporal features, split, preprocessing, models, calibration, and artifacts.
 - policy/ — decision thresholds and cost-assumption research.
 - explain/ — TreeSHAP attribution and reason-code mapping.
@@ -247,9 +326,11 @@ Open http://127.0.0.1:8000/docs for the local API schema. The API does not train
 - Bootstrap intervals resample transactions, not time blocks.
 - The API trusts caller-supplied history and cannot independently verify its completeness, freshness, authenticity, or entity association.
 - Prior-history rows are not stored with audit records, so the audit table alone cannot fully replay a score.
-- Append-only audit behavior is an application convention, not database-enforced immutability; idempotency and duplicate suppression are not implemented.
+- Idempotency keys are global to this prototype and retained indefinitely; production use would scope keys to an authenticated tenant and define a retention policy.
+- Scoring and read-only decision-history routes are unauthenticated and intended for local demonstration; only reviewer operations require the configured API key.
+- The reviewer API key is a single local operator credential, not enterprise authentication or multi-user role-based access control.
 - Policy costs and review-effectiveness assumptions are synthetic, not measured industry economics.
-- Authentication, TLS termination, rate limiting, production deployment, drift monitoring, continuous retraining, and a human-review operation are outside the current implementation.
+- TLS termination, rate limiting, production deployment, drift monitoring, and continuous retraining are outside the current implementation.
 
 ## Further documentation
 

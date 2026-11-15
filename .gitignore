@@ -26,3 +26,8 @@ mlruns/
 mlflow.db
 
 .DS_Store
+
+
+# Frontend build and dependency artifacts
+node_modules/
+frontend/dist/

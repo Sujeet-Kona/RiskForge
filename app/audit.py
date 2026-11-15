@@ -15,7 +15,14 @@ does not exist.
 from __future__ import annotations
 
 from app.schemas import RiskScoreRequest, RiskScoreResponse
-from db.repository import AuditPersistenceError, AuditRecord, AuditStore
+from db.repository import (
+    AuditPersistenceError,
+    AuditRecord,
+    AuditStore,
+    IdempotencyConflictError,
+    ReviewCaseNotFoundError,
+    ReviewCaseRecord,
+)
 
 
 AUDIT_UNAVAILABLE = "audit_unavailable"
@@ -65,6 +72,7 @@ def build_audit_record(
         top_k=request.top_k,
         model_version=response.model_version,
         feature_version=response.feature_version,
+        calibration_method=response.calibration_method,
         policy_version=response.policy_version,
         feature_count=response.feature_count,
         history_transactions_used=response.history_transactions_used,
@@ -84,5 +92,111 @@ def record_decision(
     """
     try:
         return store.create_audit_record(build_audit_record(request, response))
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
+
+
+
+def list_decisions(
+    store: AuditStore,
+    *,
+    limit: int,
+    offset: int,
+    decision: str | None = None,
+) -> tuple[list[AuditRecord], int]:
+    """Read a bounded decision-history page without exposing persistence details."""
+    try:
+        return store.list_audit_records(
+            limit=limit,
+            offset=offset,
+            decision=decision,
+        )
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
+
+
+
+def list_review_cases(
+    store: AuditStore,
+    *,
+    status: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[ReviewCaseRecord], int]:
+    """Read a bounded review queue without exposing persistence details."""
+    try:
+        return store.list_review_cases(
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
+
+
+def resolve_review_case(
+    store: AuditStore,
+    *,
+    case_id: int,
+    outcome: str,
+    reviewer_id: str,
+    comment: str | None,
+) -> ReviewCaseRecord:
+    """Record a reviewer action, preserving the original model decision."""
+    try:
+        case = store.resolve_review_case(
+            case_id=case_id,
+            outcome=outcome,
+            reviewer_id=reviewer_id,
+            comment=comment,
+        )
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
+
+    if case is None:
+        raise ReviewCaseNotFoundError(f"Review case {case_id} does not exist.")
+
+    return case
+
+
+
+def get_idempotency_response(
+    store: AuditStore,
+    *,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict | None:
+    """Return a previous response, or reject a key bound to another payload."""
+    try:
+        stored = store.get_idempotency_record(idempotency_key)
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
+
+    if stored is None:
+        return None
+    stored_hash, response_body = stored
+    if stored_hash != request_hash:
+        raise IdempotencyConflictError(
+            "Idempotency-Key was already used for a different request."
+        )
+    return response_body
+
+
+def record_idempotent_decision(
+    store: AuditStore,
+    request: RiskScoreRequest,
+    response: RiskScoreResponse,
+    *,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict:
+    """Atomically record the decision and the response used for safe retries."""
+    try:
+        return store.create_idempotent_decision(
+            build_audit_record(request, response),
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            response_body=response.model_dump(mode="json"),
+        )
     except AuditPersistenceError as error:
         raise AuditUnavailableError from error
