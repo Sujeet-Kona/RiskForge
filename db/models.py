@@ -25,6 +25,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Double,
+    ForeignKey,
     Index,
     Integer,
     MetaData,
@@ -121,4 +122,74 @@ class RiskDecision(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+
+
+class RiskReviewCase(Base):
+    """Mutable review state for one automated REVIEW decision.
+
+    The original risk_decisions row remains immutable. Resolution state lives in
+    this separate table, and each reviewer action is recorded in the append-only
+    risk_review_events table.
+    """
+
+    __tablename__ = "risk_review_cases"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING', 'APPROVED', 'REJECTED')",
+            name="status_is_a_review_state",
+        ),
+        Index("ix_risk_review_cases_status_created_at", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    decision_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("risk_decisions.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="PENDING", server_default="PENDING"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolved_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resolution_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class RiskReviewEvent(Base):
+    """Append-only record of a human action on a review case."""
+
+    __tablename__ = "risk_review_events"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('APPROVED', 'REJECTED')",
+            name="action_is_a_review_resolution",
+        ),
+        Index("ix_risk_review_events_case_created_at", "review_case_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    review_case_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("risk_review_cases.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    action: Mapped[str] = mapped_column(String(8), nullable=False)
+    reviewer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
