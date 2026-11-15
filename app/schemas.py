@@ -15,6 +15,8 @@ as an imputed gap.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import DEFAULT_TOP_K, MAX_HISTORY_TRANSACTIONS
@@ -204,6 +206,32 @@ class RiskScoreResponse(BaseModel):
     policy_version: str
     feature_count: int
     history_transactions_used: int
+
+
+class AuditDecisionSummaryOut(BaseModel):
+    """A safe, compact view of a persisted decision for the operations UI."""
+
+    model_config = STRICT
+
+    id: int | None = None
+    transaction_id: str
+    risk_probability: float
+    decision: str
+    model_version: str
+    feature_version: str
+    policy_version: str
+    created_at: datetime | None = None
+
+
+class AuditDecisionListResponse(BaseModel):
+    """A bounded page of persisted decisions and its filtered total."""
+
+    model_config = STRICT
+
+    items: list[AuditDecisionSummaryOut]
+    total: int
+    limit: int
+    offset: int
 
 
 class HealthResponse(BaseModel):
