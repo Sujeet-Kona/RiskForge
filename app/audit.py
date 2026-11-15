@@ -15,7 +15,13 @@ does not exist.
 from __future__ import annotations
 
 from app.schemas import RiskScoreRequest, RiskScoreResponse
-from db.repository import AuditPersistenceError, AuditRecord, AuditStore
+from db.repository import (
+    AuditPersistenceError,
+    AuditRecord,
+    AuditStore,
+    ReviewCaseNotFoundError,
+    ReviewCaseRecord,
+)
 
 
 AUDIT_UNAVAILABLE = "audit_unavailable"
@@ -105,3 +111,47 @@ def list_decisions(
         )
     except AuditPersistenceError as error:
         raise AuditUnavailableError from error
+
+
+
+def list_review_cases(
+    store: AuditStore,
+    *,
+    status: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[ReviewCaseRecord], int]:
+    """Read a bounded review queue without exposing persistence details."""
+    try:
+        return store.list_review_cases(
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
+
+
+def resolve_review_case(
+    store: AuditStore,
+    *,
+    case_id: int,
+    outcome: str,
+    reviewer_id: str,
+    comment: str | None,
+) -> ReviewCaseRecord:
+    """Record a reviewer action, preserving the original model decision."""
+    try:
+        case = store.resolve_review_case(
+            case_id=case_id,
+            outcome=outcome,
+            reviewer_id=reviewer_id,
+            comment=comment,
+        )
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
+
+    if case is None:
+        raise ReviewCaseNotFoundError(f"Review case {case_id} does not exist.")
+
+    return case
