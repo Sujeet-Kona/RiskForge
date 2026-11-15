@@ -32,7 +32,8 @@ model, calibrate probabilities, or search policy thresholds during a request.
 | `POST /v1/reviews/{case_id}/resolve` | Records a one-time human review outcome. |
 
 Interactive request/response schemas are available at `/docs` when the local API
-is running.
+is running. See [API examples and limits](api.md) for local request examples,
+pagination, authentication and retry behavior.
 
 A score request contains a transaction, a `history` array, and optional
 `top_k` for the number of reason codes. History must contain only records
@@ -45,7 +46,8 @@ history for the relevant entities.
 
 ### Error responses
 
-Every failure the application raises itself returns one envelope:
+Application scoring, audit and review failures use this envelope, except for
+422 responses and the health response described below:
 
 ```json
 {"error": {"code": "conflict", "message": "The request conflicts with a decision or review case that has already been recorded."}}
@@ -82,7 +84,14 @@ schema's own point-in-time rejection reason — for example that a history recor
 must be strictly earlier than the transaction being scored — and flattening them
 into a static message would remove the one piece of information a caller needs
 in order to fix the request. `tests/test_app_api.py` asserts both that the
-reason survives and that the offending field is named.
+reason survives and that the offending field is named. Invalid characters in an
+`Idempotency-Key` instead return `{"detail": "..."}` with status 422.
+
+`GET /health` is another exception: a missing or invalid artifact returns 503
+with the `HealthResponse` shape (`status="unavailable"`), not an error envelope.
+A loaded artifact with an unavailable audit store returns 200 with
+`status="ok", database="unavailable"`; clients must inspect both fields.
+`audit_unavailable` also covers failed history/queue reads and review writes.
 
 ## Idempotency
 

@@ -1,0 +1,63 @@
+{
+  "record_type": "retrospective_policy_provenance",
+  "recorded_on": "2026-11-15",
+  "evidence_limit": "This record documents inspected repository facts and gaps. It is not an original selection-run artifact and does not establish historical threshold rationale.",
+  "frozen_serving_policy": {
+    "version": "policy-001",
+    "authoritative_definition": "policy/locked.py",
+    "review_threshold": 0.075,
+    "block_threshold": 0.110,
+    "bands": {
+      "ALLOW": "p < 0.075",
+      "REVIEW": "0.075 <= p < 0.110",
+      "BLOCK": "p >= 0.110"
+    },
+    "changed_by_this_record": false,
+    "deployment_scope": "Local research prototype; not a production payment-network deployment"
+  },
+  "known_facts": [
+    "The serving policy is defined centrally and checked against the loaded artifact.",
+    "Commit 34aceca introduced policy/locked.py with already-frozen thresholds.",
+    "Boundary tests enforce the exact ALLOW, REVIEW and BLOCK intervals.",
+    "The separate cost-search script does not update the locked policy and prints its results without persisting a selection artifact."
+  ],
+  "unknown_facts": {
+    "original_threshold_selection_rationale": null,
+    "original_selection_run_identifier": null,
+    "reason_experimental_candidate_was_not_adopted": null,
+    "note": "No supporting historical evidence was found in the inspected repository. No rationale is inferred from the current implementation."
+  },
+  "separate_cost_search_experiment": {
+    "script": "scripts/select_decision_policy.py",
+    "candidate_status": "Historically documented candidate; not rerun for this provenance record",
+    "review_threshold": 0.050,
+    "block_threshold": 0.110,
+    "adopted": false,
+    "selection_partition": "VALIDATION",
+    "method": "Exhaustive feasible threshold-pair search over empirical percentiles of forward-chaining OOF calibrated scores plus an interpretable fixed grid",
+    "objective": "Minimize expected cost under synthetic project assumptions",
+    "cost_source": "policy/costs.py:EXPERIMENTAL_COST_ASSUMPTIONS",
+    "assumptions": {
+      "false_negative_cost": 100.0,
+      "false_positive_cost": 10.0,
+      "review_cost": 5.0,
+      "review_fraud_capture_rate": 0.70,
+      "units": "Synthetic cost units, not measured payment-network losses"
+    },
+    "test_handling": "TEST labels are consulted after threshold selection; the script asserts that selected thresholds remain unchanged.",
+    "limitations": [
+      "VALIDATION was reused for other development choices; OOF scoring does not make all selection decisions independent.",
+      "No stored search-run output links this candidate to the historical locked thresholds.",
+      "Adopting the candidate requires a separate authorized experiment and would change serving behavior."
+    ]
+  },
+  "evidence_references": [
+    "docs/model-evaluation.md#provenance-of-the-frozen-thresholds",
+    "policy/locked.py",
+    "policy/costs.py",
+    "app/service.py",
+    "scripts/select_decision_policy.py",
+    "tests/test_decision_policy.py",
+    "tests/test_serving_discipline.py"
+  ]
+}

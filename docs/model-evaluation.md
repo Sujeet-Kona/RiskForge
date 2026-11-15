@@ -58,6 +58,15 @@ On TEST, raw versus calibrated XGBoost results were:
 
 Calibration targets probability reliability, not ranking. Isotonic's stepwise mapping can create tied probabilities and slightly change ranking metrics.
 
+A read-only aggregation of the historical temporal reliability-bin report on
+2026-11-15 produced global TEST ECE 0.2221975902987569 (raw) and
+0.0035530458027803274 (isotonic), each over 88,081 rows. This combines weighted
+predictions and outcomes within each bin across time segments before computing
+absolute gaps; averaging segment ECEs would be a different statistic. The raw
+value differs slightly from the historical table's 0.222200. The exact cause is
+not established, so the frozen table is retained and this discrepancy is
+explicit. Neither aggregation nor a new provenance record is a fresh model run.
+
 ## Decision policy
 
 The serving API uses the frozen `policy-001` thresholds:
@@ -74,12 +83,14 @@ A forward-chaining validation search produced an experimental candidate with a 0
 
 `policy-001` is immutable. This section records what the repository can and
 cannot establish about where its two thresholds came from, so that the gap is
-explicit rather than papered over.
+explicit rather than papered over. The machine-readable
+[provenance record](../reports/policy_provenance.json) is a retrospective record,
+not evidence of an original selection run.
 
 **Known and verifiable.**
 
-- The frozen values are 0.075 and 0.110, written in exactly one place:
-  `policy/locked.py:22-23`.
+- The authoritative serving values are 0.075 and 0.110, defined by
+  `LOCKED_REVIEW_THRESHOLD` and `LOCKED_BLOCK_THRESHOLD` in `policy/locked.py`.
 - `policy/locked.py` was introduced already-locked in commit `34aceca`
   ("Add FastAPI inference service"), the same commit that added the serving
   layer, the artifact loader, and the parity script. There is no earlier commit
@@ -124,7 +135,16 @@ make silently.
 
 ## Reproduction
 
-With the IEEE-CIS files under `data/raw/ieee_cis/`, run:
+These optional research runs require `train_transaction.csv` under
+`data/raw/ieee_cis/` and the generated behavioral feature parquet. In a separate
+writable research checkout, generate it with
+`PYTHONPATH=. python scripts/build_behavioral_features.py` if needed. Do not run
+that writer through a data symlink into a protected checkout.
+
+The commands below refit models; benchmark and calibration evaluation can
+overwrite reports. Preserve existing evidence first. They are not prerequisites
+for starting an API with an existing serving artifact, and none was rerun for the
+local hardening verification documented in [verification](verification.md).
 
 ```bash
 PYTHONPATH=. python scripts/run_model_benchmark.py
@@ -179,10 +199,10 @@ the bias: there is no nested cross-validation and no separate selection
 partition, so the optimistic component cannot be separated from the real one.
 
 The clearest instance is the `D5` removal, which was accepted because VALIDATION
-PR-AUC moved from 0.471864 to 0.474352 (+0.002488). Some of that gain is real
-and some is selection noise on the same 88,013 rows. The repository records the
-decision and its measured effect; it does not claim to know the split between
-the two.
+PR-AUC moved from 0.471864 to 0.474352 (+0.002488). That observed gain may
+reflect generalizable improvement, selection noise, or both on the same 88,013
+rows. The repository records the decision and measured change; it cannot
+establish how much belongs to either component.
 
 TEST is the only partition that no selection decision consulted. Its labels are
 withheld until the final reporting step (`scripts/select_decision_policy.py:163`

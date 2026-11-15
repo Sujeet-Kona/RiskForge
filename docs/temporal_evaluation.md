@@ -6,7 +6,11 @@ or the serving policy.
 
 ## Run
 
-After following the dataset and environment setup in this document:
+Follow the [environment and dataset prerequisites](reproducibility.md) and
+[behavioral feature generation](reproducibility.md#minimal-serving-build) first.
+The serving bundle is not required. This optional research run refits models
+and can overwrite all six temporal report files; it is not part of minimal
+serving setup.
 
 ```bash
 PYTHONPATH=. python scripts/run_temporal_evaluation.py
@@ -78,7 +82,7 @@ results are reported separately and never substituted for the locked metrics.
 
 ## Evidence status
 
-The five files under `reports/temporal_robustness/` are **historical generated
+The six files under `reports/temporal_robustness/` are **historical generated
 artifacts**. They were produced by `scripts/run_temporal_evaluation.py` against
 the gitignored IEEE-CIS inputs; regenerating them requires that dataset and
 refits both candidates on every fold.

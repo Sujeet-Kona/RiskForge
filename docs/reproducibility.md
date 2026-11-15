@@ -13,10 +13,13 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m pip install ruff==0.17.3
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 ```
 
-The committed requirements file pins the Python packages used for the project. Keep the virtual environment active for the commands below.
+The committed requirements file pins the Python packages used for the project.
+Keep the virtual environment active for the commands below. Review the root
+`.env` before sourcing it; Python and Alembic do **not** automatically load it.
+The database section below exports it before any database commands.
 
 ## Dataset inputs
 
@@ -30,37 +33,51 @@ data/raw/ieee_cis/
 
 Do not rename the files: the inspection and feature-generation scripts expect these paths. The generated behavioral Parquet file, fitted serving bundle, and MLflow outputs are local artifacts and are not committed.
 
-Check that both CSV files are present, then inspect the source schema and target distribution:
+Optionally inspect the source schema and target distribution:
 
 ```bash
 PYTHONPATH=. python scripts/inspect_dataset.py
 ```
 
-This command fails early if either required CSV is missing.
+Inspection requires both CSVs and fails if either is missing. The minimal
+serving build below reads `train_transaction.csv`; it does not use the identity
+CSV or require the inspection script.
 
-## Offline feature, benchmark, and artifact workflow
+## Minimal serving build
 
-Run each stage from the repository root, in this order:
+From the repository root, with the source data available:
 
 ```bash
-# 1. Build point-in-time behavioral features from train_transaction.csv
 PYTHONPATH=. python scripts/build_behavioral_features.py
-
-# 2. Train and compare the three fixed candidate pipelines on the
-#    chronological split; writes model, segment, bootstrap, and metadata reports
-PYTHONPATH=. python scripts/run_model_benchmark.py
-
-# 3. Select the probability calibrator using forward-chaining VALIDATION scores
-PYTHONPATH=. python scripts/evaluate_calibration.py
-
-# 4. Run validation-only decision-policy research
-PYTHONPATH=. python scripts/select_decision_policy.py
-
-# 5. Build the frozen local serving bundle
 PYTHONPATH=. python scripts/build_serving_artifact.py
 ```
 
-The benchmark writes:
+These commands generate the behavioral Parquet file and fit the locked
+preprocessing/XGBoost pipeline on TRAIN plus the locked isotonic calibrator on
+VALIDATION, then write the local serving bundle. This is an offline model fit,
+not a download of a prebuilt model; rerunning replaces generated features and
+the bundle. No benchmark, calibration-evaluation, policy-search, or temporal
+report is a prerequisite. The API only loads the resulting bundle.
+
+## Optional research and report regeneration
+
+These are separate experiments, **not serving setup steps**. Run only when you
+intend to refit models and regenerate research outputs; scripts may overwrite
+existing reports. Generated calibration outputs are not supplied by a clean
+checkout and are not produced by the minimal serving build.
+
+```bash
+# Compare candidate models and regenerate benchmark reports
+PYTHONPATH=. python scripts/run_model_benchmark.py
+
+# Evaluate calibration methods and generate calibration outputs
+PYTHONPATH=. python scripts/evaluate_calibration.py
+
+# Run validation-only decision-policy research
+PYTHONPATH=. python scripts/select_decision_policy.py
+```
+
+When run successfully, the benchmark writes or replaces:
 
 - `reports/model_benchmark/model_metrics.csv`
 - `reports/model_benchmark/test_segment_metrics.csv`
@@ -78,8 +95,9 @@ itself must not be committed.
 ## Additional temporal robustness checks
 
 The additional expanding-window and time-block bootstrap experiment is
-documented in [temporal evaluation](temporal_evaluation.md). It is separate
-from the locked benchmark and requires the same local IEEE-CIS inputs.
+documented in [temporal evaluation](temporal_evaluation.md). It is optional,
+refits models, and can overwrite six files under `reports/temporal_robustness/`.
+It requires the local IEEE-CIS inputs and generated behavioral features.
 
 ```bash
 PYTHONPATH=. python scripts/run_temporal_evaluation.py
@@ -87,23 +105,82 @@ PYTHONPATH=. python scripts/run_temporal_evaluation.py
 
 ## Local API and database checks
 
-Start PostgreSQL 17 and apply migrations:
+Use a **disposable LOCAL PostgreSQL 17 server only**, not a remote, shared, or
+existing user database. Review the root `.env`: `DATABASE_URL` must point to
+that server on `localhost` or `127.0.0.1`, with port, database, and role matching
+`POSTGRES_PORT`, `POSTGRES_DB`, and `POSTGRES_USER`. If the default port is in
+use, choose a free local port and update both settings. A loopback address alone
+does not prove isolation; ensure it is this container, not a tunnel.
+
+Compose reuses its named volume and fixed `riskforge-postgres` container name;
+starting it does not guarantee an empty database. If existing state is not
+explicitly disposable, stop and provision an isolated local server instead.
+Do not run migrations against an existing/user database just to make setup pass.
+
+Export the reviewed environment **before Alembic or Python**, then wait for the
+container healthcheck (requires Docker Compose with `--wait` support):
 
 ```bash
-docker compose up -d
-.venv/bin/alembic upgrade head
+set -a
+source .env
+set +a
+docker compose up -d --wait postgres
+docker compose port postgres 5432
 ```
 
-Run static, migration, and test checks:
+Stop on any error. Confirm the published port matches `DATABASE_URL`, then run
+this read-only target check from the repository root:
+
+```bash
+python - <<'PY'
+import os
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
+from db.config import DatabaseConfig
+
+if not os.environ.get("DATABASE_URL"):
+    raise SystemExit("Stop: export the reviewed DATABASE_URL first.")
+url = make_url(DatabaseConfig.from_environment().url)
+expected = (os.environ["POSTGRES_USER"], os.environ["POSTGRES_DB"], int(os.environ["POSTGRES_PORT"]))
+if (url.host not in {"localhost", "127.0.0.1"} or url.query
+        or (url.username, url.database, url.port or 5432) != expected):
+    raise SystemExit("Stop: DATABASE_URL does not match the local Compose target.")
+print(f"Target: {url.host}:{url.port or 5432}/{url.database}; role: {url.username}")
+with create_engine(url).connect() as connection:
+    print(connection.execute(text("SELECT current_database(), current_user")).one())
+PY
+```
+
+Only after the output confirms the intended disposable database and role,
+apply migrations in this same shell:
+
+```bash
+.venv/bin/alembic upgrade head
+.venv/bin/alembic check
+```
+
+Static checks do not require a database:
 
 ```bash
 .venv/bin/python -m ruff check .
 .venv/bin/python -m compileall -q .
-.venv/bin/alembic check
+```
+
+**Before pytest:** `tests/conftest.py` always derives `riskforge_test` on the
+server configured by `DATABASE_URL` (or the default server if unset), regardless
+of the database name you supply. It may create that database, downgrade it to
+base, rebuild its schema, and truncate tables. Changing only the URL's database
+name does not isolate tests. Use only the verified disposable LOCAL server,
+and ensure any existing `riskforge_test` data can be destroyed. Set
+`RISKFORGE_REQUIRE_POSTGRES=1` so unavailable PostgreSQL fails rather than
+silently skipping database coverage:
+
+```bash
 RISKFORGE_REQUIRE_POSTGRES=1 .venv/bin/python -m pytest -q
 ```
 
-Start the API only after building the serving artifact:
+Start the API in the same exported environment only after the minimal serving
+build and verified database setup:
 
 ```bash
 uvicorn app.main:app --reload
@@ -131,6 +208,10 @@ Probabilities, decisions, reason codes, and decision explanations also
 matched; the largest absolute difference in the two floating-point amount-sum
 features was 1.310e-10 against a 1e-9 tolerance.
 
+The check was rerun successfully during local hardening on 2026-11-15; see
+[verification evidence](verification.md). Its audit-store double keeps records
+in memory and never writes parity decisions to PostgreSQL.
+
 This is a three-case parity check, not an exhaustive proof for every possible
 request. It does not verify that caller-supplied history is complete or
 authentic.
@@ -138,13 +219,15 @@ authentic.
 ## CI scope
 
 GitHub Actions runs Ruff, Python compilation, Alembic migration/schema checks,
-and pytest against PostgreSQL 17.
+and pytest against PostgreSQL 17. It also typechecks and builds the frontend,
+but **does not run Vitest yet**. See [frontend checks](../frontend/README.md#frontend-checks)
+for local commands; changing the shared CI pipeline requires separate permission.
 
 CI does **not** download IEEE-CIS, train a model, build the serving artifact,
 run the real-data parity script, connect to MLflow, or deploy the API. Those
 steps require the separately obtained dataset and/or generated local artifacts.
-A green CI run verifies the committed application and database test suite; it
-is not a fresh model-training or benchmark reproduction.
+A green CI run is not a fresh model-training or benchmark reproduction, nor
+evidence that frontend tests ran.
 
 ## Reproducibility boundaries
 
@@ -232,27 +315,26 @@ as a serving system.
 | `app/`, `db/`, `ml/`, `policy/`, `explain/`, `tracking/`, `scripts/`, `alembic/`, `tests/`, `frontend/src/` | **yes** | read and test the code |
 | `docs/`, `README.md`, `.env.example`, `.github/workflows/ci.yml` | **yes** | understand and CI-verify the project |
 | `reports/model_benchmark/` (4 files) | **yes** | check the locked benchmark numbers |
-| `reports/temporal_robustness/` (5 files) | **yes** | check the walk-forward and bootstrap numbers |
-| `reports/calibration/evaluation_metrics.json` | **no** — generated on demand | verify relative Brier/ECE reductions |
-| `data/raw/ieee_cis/*.csv` | **no** — gitignored, obtain from Kaggle | run any training or evaluation script |
-| `data/processed/train_behavioral_v1.parquet` | **no** — gitignored | skip stage 1 of the workflow |
+| `reports/temporal_robustness/` (6 files) | **yes** | check the walk-forward and bootstrap numbers |
+| `reports/calibration/evaluation_metrics.json` | **no** — optional calibration-evaluation output | verify relative Brier/ECE reductions after regeneration |
+| `data/raw/ieee_cis/*.csv` | **no** — gitignored, obtain from Kaggle | run real-data training or evaluation |
+| `data/processed/train_behavioral_v1.parquet` | **no** — gitignored | build the serving bundle and run research scripts |
 | `artifacts/serving/riskforge_serving_artifact.joblib` | **no** — gitignored | serve predictions or run the parity check |
 | `mlruns/`, `mlflow.db` | **no** — gitignored | reproduce experiment tracking |
 | `.env` | **no** — gitignored | supply local database and reviewer-key settings |
 
 Two consequences worth stating plainly:
 
-- **The test suite does not need the dataset or the artifact.** The fixtures
-  build a synthetic 600-row modeling frame through the real
-  `build_modeling_frame` and the real preprocessor (`tests/conftest.py:46-56`),
-  so the full suite — including the serving-discipline, explainability,
-  parity, migration, and concurrency suites — run and pass on a clean clone with
-  only a PostgreSQL server available. This is why CI is green without IEEE-CIS.
-- **Serving does need them.** `app/dependencies.py:80-109` fails closed when
-  the artifact is missing or invalid; there is no fallback model. To run the
-  API locally you must obtain the dataset and execute stages 1 through 5 of the
-  workflow above, which regenerates the behavioral Parquet file and the frozen
-  serving bundle.
+- **The test suite does not need the real dataset or serving artifact.** The
+  fixtures fit small synthetic models using a 600-row modeling frame and the
+  real feature contract/preprocessor. Database tests still require the
+  disposable LOCAL server and destructive-test precautions above; no pass
+  result is implied merely by installing dependencies.
+- **Serving does need a compatible fitted bundle.** The API fails closed when
+  it is missing or invalid; there is no fallback model. Obtain the source data
+  and run the two commands in [Minimal serving build](#minimal-serving-build)
+  to generate behavioral features and the local bundle. Optional research
+  reports and calibration-evaluation outputs are not required.
 
 The committed `reports/` CSVs are historical generated artifacts. They can be
 checked for internal consistency and against the code that produced them

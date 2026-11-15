@@ -128,9 +128,9 @@ Phase 5 reason codes.
 {HISTORY_NOTE}
 
 Every decision that is returned has first been written to a PostgreSQL audit
-store, so it can be reconstructed later. The database records decisions; it never
-supplies a feature. A decision that cannot be recorded is reported as a 503
-failure rather than returned unaudited.
+store. Prior-history rows are not retained, so the record alone cannot replay
+the full score. The database never supplies a feature. A decision that cannot
+be recorded is reported as a 503 failure rather than returned unaudited.
 
 The model, calibration and preprocessing are loaded once at startup from a frozen
 artifact. This service never trains, never fits a calibrator and never falls back

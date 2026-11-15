@@ -1,14 +1,4 @@
-"""The one definition of the frozen Phase 4 decision policy.
-
-``policy-001`` and its two thresholds were selected in Phase 4 and are locked.
-They were previously restated in each consuming script, which meant every new
-consumer was a fresh opportunity to drift. This module is the single place the
-frozen values are written down; scripts and the serving API build their policy
-from here so a decision can always be traced to one definition.
-
-Nothing is derived, optimised or validated at runtime beyond what
-:class:`~policy.decision.PolicyConfig` already enforces.
-"""
+"""Frozen policy constants; their original selection rationale is not recorded."""
 
 from __future__ import annotations
 
