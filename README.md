@@ -167,7 +167,7 @@ Policy research used synthetic assumptions: missed-fraud cost 100 units, false-d
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | /health | Service, artifact identity, and database readiness |
-| POST | /v1/risk/score | Score one transaction using caller-supplied prior history |
+| POST | /v1/risk/score | Score one transaction using caller-supplied prior history; optional `Idempotency-Key` supports safe retries |
 | GET | /v1/audit/decisions | Paginated, newest-first decision history; optional ALLOW/REVIEW/BLOCK filter |
 | GET | /v1/reviews | Authenticated pending review queue |
 | POST | /v1/reviews/{case_id}/resolve | Record an APPROVED or REJECTED human outcome without rewriting the model decision |
@@ -301,7 +301,7 @@ Open http://127.0.0.1:8000/docs for the local API schema. The API does not train
 - Bootstrap intervals resample transactions, not time blocks.
 - The API trusts caller-supplied history and cannot independently verify its completeness, freshness, authenticity, or entity association.
 - Prior-history rows are not stored with audit records, so the audit table alone cannot fully replay a score.
-- Idempotency and duplicate suppression are not implemented.
+- Idempotency keys are global to this prototype and retained indefinitely; production use would scope keys to an authenticated tenant and define a retention policy.
 - The reviewer API key is a single local operator credential, not enterprise authentication or multi-user role-based access control.
 - Policy costs and review-effectiveness assumptions are synthetic, not measured industry economics.
 - TLS termination, rate limiting, production deployment, drift monitoring, and continuous retraining are outside the current implementation.

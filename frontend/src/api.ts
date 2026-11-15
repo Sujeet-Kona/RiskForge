@@ -41,9 +41,10 @@ export function getDecisionHistory(limit = 8) {
   );
 }
 
-export function scoreTransaction(payload: ScoreRequest) {
+export function scoreTransaction(payload: ScoreRequest, idempotencyKey: string) {
   return request<ScoreResponse>("/v1/risk/score", {
     method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(payload),
   });
 }

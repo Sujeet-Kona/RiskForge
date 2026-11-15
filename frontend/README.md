@@ -29,8 +29,9 @@ The Vite development server proxies `/api` requests to the FastAPI service. Set
 ## Current scope
 
 - Reads `GET /health` and displays artifact/database readiness.
-- Sends the existing `POST /v1/risk/score` request contract without reimplementing
-  feature engineering, calibration, TreeSHAP or policy thresholds in JavaScript.
+- Sends the existing `POST /v1/risk/score` request contract with a stable
+  per-submission idempotency key, without reimplementing feature engineering,
+  calibration, TreeSHAP or policy thresholds in JavaScript.
 - Displays the calibrated probability, original policy decision, model signals,
   risk-reducing signals and model/feature/policy versions returned by the API.
 - Reads persisted decisions from the paginated `GET /v1/audit/decisions` endpoint.

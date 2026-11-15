@@ -41,6 +41,7 @@ function App() {
   const [reviewActionId, setReviewActionId] = useState<number | null>(null);
   const [reviewComments, setReviewComments] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const [result, setResult] = useState<ScoreResponse | null>(null);
   const [error, setError] = useState("");
   const [historyText, setHistoryText] = useState("[]");
@@ -146,6 +147,7 @@ function App() {
 
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+    setIdempotencyKey(crypto.randomUUID());
   }
 
   async function submitScore(event: FormEvent<HTMLFormElement>) {
@@ -188,8 +190,9 @@ function App() {
         },
         history,
         top_k: Number(form.topK),
-      });
+      }, idempotencyKey);
       setResult(response);
+      setIdempotencyKey(crypto.randomUUID());
       void refreshHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scoring request failed.");
@@ -290,7 +293,7 @@ function App() {
               </div>
 
               <div className="form-section-title history-title">BEHAVIORAL CONTEXT <span>{historyCount} records</span></div>
-              <label className="field full"><span>Prior transaction history <em>JSON array · strictly earlier timestamps only</em></span><textarea rows={4} spellCheck={false} value={historyText} onChange={(e) => setHistoryText(e.target.value)} /></label>
+              <label className="field full"><span>Prior transaction history <em>JSON array · strictly earlier timestamps only</em></span><textarea rows={4} spellCheck={false} value={historyText} onChange={(e) => { setHistoryText(e.target.value); setIdempotencyKey(crypto.randomUUID()); }} /></label>
               <div className="form-hint"><CircleHelp size={14} /> History rows require TransactionDT and TransactionAmt. Include card1 / addr1 / addr2 to match the current entity.</div>
 
               {error && <div className="notice error"><AlertCircle size={17} /><span>{error}</span></div>}
