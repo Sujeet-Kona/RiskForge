@@ -21,13 +21,14 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from db.models import (
     DECISION_VALUES,
     RiskDecision,
     RiskReviewCase,
     RiskReviewEvent,
+    RiskIdempotencyRecord,
 )
 from db.session import AuditDatabase
 
@@ -49,6 +50,10 @@ class ReviewCaseNotFoundError(LookupError):
 
 class ReviewConflictError(RuntimeError):
     """A review case has already been resolved by another action."""
+
+
+class IdempotencyConflictError(RuntimeError):
+    """An idempotency key was reused for a different request body."""
 
 
 @dataclass(frozen=True)
@@ -171,6 +176,19 @@ class AuditStore(Protocol):
         self, *, status: str | None, limit: int, offset: int
     ) -> tuple[list[ReviewCaseRecord], int]: ...
 
+    def get_idempotency_record(
+        self, idempotency_key: str
+    ) -> tuple[str, dict[str, Any]] | None: ...
+
+    def create_idempotent_decision(
+        self,
+        record: AuditRecord,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+        response_body: dict[str, Any],
+    ) -> dict[str, Any]: ...
+
     def resolve_review_case(
         self, *, case_id: int, outcome: str, reviewer_id: str, comment: str | None
     ) -> ReviewCaseRecord | None: ...
@@ -258,6 +276,91 @@ class AuditRepository:
             logger.error("could not list audit records", exc_info=error)
             raise AuditPersistenceError(
                 "The audit records could not be read from the audit store."
+            ) from error
+
+    def get_idempotency_record(
+        self,
+        idempotency_key: str,
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Return the request fingerprint and original response for a key."""
+        try:
+            with self.database.session_factory() as session:
+                row = session.get(RiskIdempotencyRecord, idempotency_key)
+                if row is None:
+                    return None
+                return row.request_hash, dict(row.response_body)
+        except SQLAlchemyError as error:
+            logger.error("could not read idempotency record", exc_info=error)
+            raise AuditPersistenceError(
+                "The idempotency record could not be read from the audit store."
+            ) from error
+
+    def create_idempotent_decision(
+        self,
+        record: AuditRecord,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+        response_body: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically persist a decision, optional review case and replay body."""
+        try:
+            with self.database.session_factory() as session:
+                existing = session.get(RiskIdempotencyRecord, idempotency_key)
+                if existing is not None:
+                    if existing.request_hash != request_hash:
+                        raise IdempotencyConflictError(
+                            "Idempotency-Key was already used for a different request."
+                        )
+                    return dict(existing.response_body)
+
+                row = RiskDecision(
+                    **{name: getattr(record, name) for name in AUDIT_RECORD_FIELDS}
+                )
+                session.add(row)
+                session.flush()
+                if record.decision == "REVIEW":
+                    session.add(RiskReviewCase(decision_id=int(row.id)))
+                session.add(
+                    RiskIdempotencyRecord(
+                        idempotency_key=idempotency_key,
+                        request_hash=request_hash,
+                        decision_id=int(row.id),
+                        response_body=response_body,
+                    )
+                )
+                session.commit()
+                return response_body
+        except IdempotencyConflictError:
+            raise
+        except IntegrityError as error:
+            # Two identical keys can arrive concurrently. The unique primary key
+            # elects one writer; the losing transaction is rolled back in full,
+            # then reads the winner's response in a fresh session.
+            try:
+                with self.database.session_factory() as session:
+                    existing = session.get(RiskIdempotencyRecord, idempotency_key)
+                    if existing is not None:
+                        if existing.request_hash != request_hash:
+                            raise IdempotencyConflictError(
+                                "Idempotency-Key was already used for a different request."
+                            )
+                        return dict(existing.response_body)
+            except IdempotencyConflictError:
+                raise
+            except SQLAlchemyError as read_error:
+                logger.error(
+                    "could not read concurrent idempotency winner",
+                    exc_info=read_error,
+                )
+            logger.error("could not persist idempotent decision", exc_info=error)
+            raise AuditPersistenceError(
+                "The idempotent risk decision could not be recorded."
+            ) from error
+        except SQLAlchemyError as error:
+            logger.error("could not persist idempotent decision", exc_info=error)
+            raise AuditPersistenceError(
+                "The idempotent risk decision could not be recorded."
             ) from error
 
     def list_review_cases(
