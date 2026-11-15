@@ -11,7 +11,7 @@ Skipped, visibly, when no PostgreSQL is reachable locally. CI fails instead.
 
 from __future__ import annotations
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.reflection import Inspector
 
@@ -257,3 +257,55 @@ def test_a_full_downgrade_upgrade_cycle_rebuilds_the_same_schema(
     finally:
         if AUDIT_TABLE_NAME not in _user_tables(audit_database.engine):
             command.upgrade(alembic_config, "head")
+
+
+
+def test_existing_review_decisions_are_backfilled_and_old_calibration_is_unknown(
+    audit_database, alembic_config
+):
+    """Upgrading a database with prior audit rows preserves REVIEW work."""
+    command.downgrade(alembic_config, "7eccd8f63a8c")
+    with audit_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO risk_decisions (
+                    transaction_id, risk_probability, decision, reason_codes,
+                    risk_decreasing_signals, decision_reason_code,
+                    decision_explanation, model_detail, policy_detail,
+                    scored_inputs, top_k, model_version, feature_version,
+                    policy_version, feature_count, history_transactions_used
+                ) VALUES (
+                    'legacy-review', 0.09, 'REVIEW', '[]'::jsonb, '[]'::jsonb,
+                    '{}'::jsonb, 'legacy decision', '{}'::jsonb, '{}'::jsonb,
+                    '{}'::jsonb, 3, 'xgb-001', 'behavioral-v1',
+                    'policy-001', 28, 0
+                )
+                """
+            )
+        )
+
+    command.upgrade(alembic_config, "head")
+
+    with audit_database.engine.connect() as connection:
+        row = connection.execute(
+            text(
+                """
+                SELECT review.status, decision.calibration_method
+                FROM risk_review_cases AS review
+                JOIN risk_decisions AS decision ON decision.id = review.decision_id
+                WHERE decision.transaction_id = 'legacy-review'
+                """
+            )
+        ).one()
+
+    assert row.status == "PENDING"
+    assert row.calibration_method == "unknown"
+
+    with audit_database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "TRUNCATE TABLE risk_idempotency_records, risk_review_events, "
+                "risk_review_cases, risk_decisions RESTART IDENTITY"
+            )
+        )
