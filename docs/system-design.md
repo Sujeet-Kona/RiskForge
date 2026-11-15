@@ -109,12 +109,32 @@ explanation, and model/feature/calibration/policy identifiers.
 A configured reviewer key is required for both queue reads and resolution
 actions. The current demo uses one operator identity configured by
 `RISKFORGE_REVIEWER_ID` and one secret configured by
-`RISKFORGE_REVIEWER_API_KEY`. This is local demonstration authentication, not a
-production identity provider or multi-user role system.
+`RISKFORGE_REVIEWER_API_KEY`. The comparison is `hmac.compare_digest`
+(`app/dependencies.py:152`), so it does not short-circuit on the first differing
+byte. This is local demonstration authentication, not a production identity
+provider or multi-user role system.
 
 Review outcomes are `APPROVED` or `REJECTED`. The original automated decision
 remains `REVIEW`; human resolution is stored separately. Each case can move
 once from `PENDING` to a terminal state.
+
+`POST /v1/reviews/{case_id}/resolve` deliberately takes no `Idempotency-Key`.
+The scoring endpoint needs one because each accepted request would otherwise
+create a second decision row; resolution cannot. Exactly-once is enforced below
+the API, twice over: `resolve_review_case` takes a `SELECT ... FOR UPDATE` row
+lock and refuses a case that is no longer `PENDING`, and the
+`trg_risk_review_cases_one_way` trigger rejects the transition in PostgreSQL even
+if the application lock were removed. Six concurrent reviewers therefore produce
+one resolution and one append-only review event, which
+`tests/test_db_repository.py::test_concurrent_reviewers_produce_one_resolution_and_one_event`
+asserts directly.
+
+The trade-off is that a client retrying after a network timeout receives 409
+rather than a replay of its own successful response. It cannot tell "my retry
+landed" apart from "another reviewer won the race" without reading the queue
+back, which now reports the recorded outcome and the reviewer who recorded it.
+Adding a key store to distinguish those two cases would duplicate a guarantee
+the database already gives.
 
 ## Model explanations and policy explanations
 
