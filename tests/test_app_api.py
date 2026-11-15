@@ -586,3 +586,65 @@ def test_a_validation_error_body_is_structured_and_names_the_field(client, score
     assert "detail" in body
     assert body["detail"][0]["loc"][-1] == "TransactionAmt"
     assert "Traceback" not in str(body)
+
+
+def test_application_failures_all_use_the_same_error_envelope(client, monkeypatch):
+    """One shape for every failure the application raises itself.
+
+    Before this, an ``HTTPException`` produced ``{"detail": ...}`` while the
+    artifact, audit and unhandled-failure handlers produced
+    ``{"error": {"code", "message"}}``, so a client had to parse two contracts.
+    Request validation is the documented exception: it keeps FastAPI's
+    ``{"detail": [...]}`` shape so the schema's own rejection reason survives.
+    """
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "correct-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+
+    responses = [
+        client.get("/v1/this-route-does-not-exist"),
+        client.get("/v1/reviews", headers={"X-Reviewer-API-Key": "wrong-key"}),
+        client.get(SCORE_ROUTE),
+    ]
+
+    assert [response.status_code for response in responses] == [404, 401, 405]
+
+    for response in responses:
+        body = response.json()
+
+        assert set(body) == {"error"}, response.request.url.path
+        assert set(body["error"]) == {"code", "message"}
+        assert body["error"]["code"]
+        assert body["error"]["message"]
+
+
+def test_a_conflict_and_a_disabled_review_queue_use_the_envelope_too(
+    client, audit_store, audit_record, monkeypatch
+):
+    """The 409 and reviewer-503 paths are envelope-shaped as well."""
+    audit_store.create_audit_record(audit_record)
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "test-review-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+    headers = {"X-Reviewer-API-Key": "test-review-key"}
+
+    first = client.post(
+        "/v1/reviews/1/resolve",
+        headers=headers,
+        json={"outcome": "APPROVED", "comment": None},
+    )
+    second = client.post(
+        "/v1/reviews/1/resolve",
+        headers=headers,
+        json={"outcome": "REJECTED", "comment": None},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "conflict"
+
+    monkeypatch.delenv("RISKFORGE_REVIEWER_API_KEY", raising=False)
+    monkeypatch.delenv("RISKFORGE_REVIEWER_ID", raising=False)
+
+    disabled = client.get("/v1/reviews", headers=headers)
+
+    assert disabled.status_code == 503
+    assert disabled.json()["error"]["code"] == "reviewer_unconfigured"

@@ -43,6 +43,47 @@ The service is stateless with respect to transaction history. It does not query
 the audit table to construct features. The caller is responsible for supplying
 history for the relevant entities.
 
+### Error responses
+
+Every failure the application raises itself returns one envelope:
+
+```json
+{"error": {"code": "conflict", "message": "The request conflicts with a decision or review case that has already been recorded."}}
+```
+
+| Status | `code` | Raised when |
+| --- | --- | --- |
+| 401 | `unauthenticated` | the reviewer API key is absent or wrong |
+| 404 | `not_found` | the path does not exist, or the review case does not |
+| 405 | `method_not_allowed` | the path exists but not for that verb |
+| 409 | `conflict` | an `Idempotency-Key` was reused for a different request, or the review case is already resolved |
+| 422 | *see below* | the request body failed schema or point-in-time validation |
+| 503 | `artifact_not_found`, `artifact_invalid` | the frozen serving bundle is missing or unusable |
+| 503 | `audit_unavailable` | a decision could not be written to PostgreSQL, so it is not returned |
+| 503 | `reviewer_unconfigured` | reviewer credentials are not set, so review operations are disabled |
+| 500 | `inference_failed` | scoring raised; no probability and no decision are returned |
+
+Two properties are enforced by tests rather than by convention:
+
+- **No message is composed at runtime.** `test_every_client_facing_error_message_is_a_module_level_constant`
+  requires every `message=` passed to `_error_response` to name a module-level
+  constant, so a traceback, path, SQL statement or driver error can never reach
+  a caller through this envelope. The status alone selects the message; a 409
+  from the score route and a 409 from the review route therefore share one
+  wording, and the request path is what tells the caller which resource
+  conflicted.
+- **A failure is never reported as a score.** The 500 and `audit_unavailable`
+  handlers return no `risk_probability` and no `decision`, and the cause is
+  logged server-side only.
+
+**422 is the deliberate exception to the envelope.** Request-validation failures
+keep FastAPI's standard `{"detail": [...]}` array. Those errors carry the
+schema's own point-in-time rejection reason — for example that a history record
+must be strictly earlier than the transaction being scored — and flattening them
+into a static message would remove the one piece of information a caller needs
+in order to fix the request. `tests/test_app_api.py` asserts both that the
+reason survives and that the offending field is named.
+
 ## Idempotency
 
 The scoring endpoint accepts an optional `Idempotency-Key` header. The API hashes
