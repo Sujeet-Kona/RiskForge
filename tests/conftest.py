@@ -13,7 +13,11 @@ import pytest
 from sklearn.pipeline import Pipeline
 
 from db.config import DATABASE_URL_ENVIRONMENT_VARIABLE, DEFAULT_DATABASE_URL
-from db.repository import ReviewCaseRecord, ReviewConflictError
+from db.repository import (
+    IdempotencyConflictError,
+    ReviewCaseRecord,
+    ReviewConflictError,
+)
 from ml.data.modeling import (
     CD_FEATURES,
     MODEL_FEATURES,
@@ -347,6 +351,7 @@ class InMemoryAuditStore:
         self.records: list = []
         self.review_cases: list[ReviewCaseRecord] = []
         self.review_events: list[dict] = []
+        self.idempotency_records: dict[str, tuple[str, dict]] = {}
         self.failure: Exception | None = None
         self.ready: bool = True
 
@@ -354,6 +359,7 @@ class InMemoryAuditStore:
         self.records = []
         self.review_cases = []
         self.review_events = []
+        self.idempotency_records = {}
         self.failure = None
         self.ready = True
 
@@ -402,6 +408,32 @@ class InMemoryAuditStore:
             if decision is None or record.decision == decision
         ]
         return matches[offset : offset + limit], len(matches)
+
+    def get_idempotency_record(self, idempotency_key: str):
+        if self.failure is not None:
+            raise self.failure
+        return self.idempotency_records.get(idempotency_key)
+
+    def create_idempotent_decision(
+        self,
+        record,
+        *,
+        idempotency_key: str,
+        request_hash: str,
+        response_body: dict,
+    ):
+        if self.failure is not None:
+            raise self.failure
+        existing = self.idempotency_records.get(idempotency_key)
+        if existing is not None:
+            if existing[0] != request_hash:
+                raise IdempotencyConflictError(
+                    "Idempotency-Key was already used for a different request."
+                )
+            return existing[1]
+        self.create_audit_record(record)
+        self.idempotency_records[idempotency_key] = (request_hash, response_body)
+        return response_body
 
     def list_review_cases(
         self, *, status: str | None, limit: int, offset: int
