@@ -23,7 +23,7 @@ from sqlalchemy import text
 
 from app.audit import AUDIT_UNAVAILABLE, AUDIT_UNAVAILABLE_MESSAGE
 from app.config import DEFAULT_TOP_K
-from app.main import SCORE_ROUTE, create_app
+from app.main import AUDIT_ROUTE, SCORE_ROUTE, create_app
 from app.schemas import RiskScoreResponse
 from db.config import DatabaseConfig
 from db.models import AUDIT_TABLE_NAME
@@ -170,6 +170,65 @@ def test_nothing_is_recorded_for_a_request_that_was_rejected(
 
     assert response.status_code == 422
     assert audit_store.records == []
+
+
+# --- read-only decision history -----------------------------------------------
+
+
+def test_decision_history_returns_newest_first_page_and_total(
+    client, audit_store, score_payload
+):
+    first = _score(client, score_payload)
+    second_payload = {
+        **score_payload,
+        "transaction": {
+            **score_payload["transaction"],
+            "TransactionID": "RF-HISTORY-SECOND",
+        },
+    }
+    second = _score(client, second_payload)
+
+    response = client.get(AUDIT_ROUTE, params={"limit": 1, "offset": 0})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    assert body["limit"] == 1
+    assert body["offset"] == 0
+    assert len(body["items"]) == 1
+    assert body["items"][0]["transaction_id"] == second["transaction_id"]
+    assert body["items"][0]["decision"] == second["decision"]
+    assert body["items"][0]["risk_probability"] == second["risk_probability"]
+    assert body["items"][0]["model_version"] == "xgb-001"
+    assert body["items"][0]["feature_version"] == "behavioral-v1"
+    assert body["items"][0]["policy_version"] == "policy-001"
+    assert first["transaction_id"] != second["transaction_id"]
+
+
+def test_decision_history_filters_by_policy_outcome(client, score_payload):
+    scored = _score(client, score_payload)
+
+    response = client.get(
+        AUDIT_ROUTE,
+        params={"decision": scored["decision"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["decision"] == scored["decision"]
+
+
+def test_decision_history_rejects_unknown_outcome(client):
+    response = client.get(AUDIT_ROUTE, params={"decision": "DECLINE"})
+
+    assert response.status_code == 422
+
+
+def test_decision_history_bounds_page_size(client):
+    assert client.get(AUDIT_ROUTE, params={"limit": 101}).status_code == 422
+    assert client.get(AUDIT_ROUTE, params={"limit": 0}).status_code == 422
+    assert client.get(AUDIT_ROUTE, params={"offset": -1}).status_code == 422
 
 
 # --- a decision that cannot be audited is not returned ------------------------
