@@ -306,6 +306,114 @@ def test_a_recovered_audit_store_scores_again(client, audit_store, score_payload
     assert len(audit_store.records) == 1
 
 
+# --- human review is separate from the automated decision --------------------
+
+
+def test_only_review_decisions_create_review_cases(audit_store, audit_record):
+    audit_store.create_audit_record(audit_record)
+    assert len(audit_store.review_cases) == 1
+    assert audit_store.review_cases[0].status == "PENDING"
+    assert audit_store.review_cases[0].decision.decision == "REVIEW"
+
+    allowed = dataclasses.replace(audit_record, decision="ALLOW")
+    audit_store.create_audit_record(allowed)
+    assert len(audit_store.review_cases) == 1
+
+
+def test_review_queue_requires_configured_reviewer_credentials(
+    client, audit_store, audit_record, monkeypatch
+):
+    audit_store.create_audit_record(audit_record)
+    monkeypatch.delenv("RISKFORGE_REVIEWER_API_KEY", raising=False)
+    monkeypatch.delenv("RISKFORGE_REVIEWER_ID", raising=False)
+
+    response = client.get("/v1/reviews")
+
+    assert response.status_code == 503
+
+
+def test_review_queue_rejects_an_invalid_reviewer_key(
+    client, audit_store, audit_record, monkeypatch
+):
+    audit_store.create_audit_record(audit_record)
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "correct-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+
+    response = client.get(
+        "/v1/reviews",
+        headers={"X-Reviewer-API-Key": "wrong-key"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_authenticated_review_queue_returns_original_decision(
+    client, audit_store, audit_record, monkeypatch
+):
+    audit_store.create_audit_record(audit_record)
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "test-review-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+
+    response = client.get(
+        "/v1/reviews",
+        headers={"X-Reviewer-API-Key": "test-review-key"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    case = body["items"][0]
+    assert case["status"] == "PENDING"
+    assert case["decision"] == "REVIEW"
+    assert case["transaction_id"] == audit_record.transaction_id
+    assert case["model_version"] == audit_record.model_version
+    assert case["reason_codes"] == audit_record.reason_codes
+
+
+def test_reviewer_resolution_is_recorded_without_rewriting_model_decision(
+    client, audit_store, audit_record, monkeypatch
+):
+    audit_store.create_audit_record(audit_record)
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "test-review-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+    headers = {"X-Reviewer-API-Key": "test-review-key"}
+
+    response = client.post(
+        "/v1/reviews/1/resolve",
+        headers=headers,
+        json={"outcome": "APPROVED", "comment": "Reviewed supporting context."},
+    )
+
+    assert response.status_code == 200
+    case = response.json()["case"]
+    assert case["status"] == "APPROVED"
+    assert case["decision"] == "REVIEW"
+    assert case["resolved_by"] == "reviewer-01"
+    assert case["resolution_comment"] == "Reviewed supporting context."
+    assert len(audit_store.review_events) == 1
+    assert audit_store.review_events[0]["action"] == "APPROVED"
+
+    duplicate = client.post(
+        "/v1/reviews/1/resolve",
+        headers=headers,
+        json={"outcome": "REJECTED"},
+    )
+    assert duplicate.status_code == 409
+
+
+def test_review_resolution_rejects_missing_cases(client, monkeypatch):
+    monkeypatch.setenv("RISKFORGE_REVIEWER_API_KEY", "test-review-key")
+    monkeypatch.setenv("RISKFORGE_REVIEWER_ID", "reviewer-01")
+
+    response = client.post(
+        "/v1/reviews/999/resolve",
+        headers={"X-Reviewer-API-Key": "test-review-key"},
+        json={"outcome": "REJECTED"},
+    )
+
+    assert response.status_code == 404
+
+
 # --- readiness is reported without changing liveness --------------------------
 
 
