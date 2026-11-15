@@ -19,6 +19,7 @@ from db.repository import (
     AuditPersistenceError,
     AuditRecord,
     AuditStore,
+    IdempotencyConflictError,
     ReviewCaseNotFoundError,
     ReviewCaseRecord,
 )
@@ -155,3 +156,46 @@ def resolve_review_case(
         raise ReviewCaseNotFoundError(f"Review case {case_id} does not exist.")
 
     return case
+
+
+
+def get_idempotency_response(
+    store: AuditStore,
+    *,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict | None:
+    """Return a previous response, or reject a key bound to another payload."""
+    try:
+        stored = store.get_idempotency_record(idempotency_key)
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
+
+    if stored is None:
+        return None
+    stored_hash, response_body = stored
+    if stored_hash != request_hash:
+        raise IdempotencyConflictError(
+            "Idempotency-Key was already used for a different request."
+        )
+    return response_body
+
+
+def record_idempotent_decision(
+    store: AuditStore,
+    request: RiskScoreRequest,
+    response: RiskScoreResponse,
+    *,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict:
+    """Atomically record the decision and the response used for safe retries."""
+    try:
+        return store.create_idempotent_decision(
+            build_audit_record(request, response),
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            response_body=response.model_dump(mode="json"),
+        )
+    except AuditPersistenceError as error:
+        raise AuditUnavailableError from error
