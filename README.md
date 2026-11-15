@@ -168,6 +168,7 @@ Policy research used synthetic assumptions: missed-fraud cost 100 units, false-d
 |---|---|---|
 | GET | /health | Service, artifact identity, and database readiness |
 | POST | /v1/risk/score | Score one transaction using caller-supplied prior history |
+| GET | /v1/audit/decisions | Paginated, newest-first decision history; optional ALLOW/REVIEW/BLOCK filter |
 
 The request includes the current transaction and a history array. History timestamps must be strictly earlier than the current transaction; same-timestamp and future records are rejected. Only the trailing 24 hours affect behavioral features. The API accepts at most 2,000 history records and rejects larger requests rather than truncating them. top_k controls returned reason signals (default 3).
 
