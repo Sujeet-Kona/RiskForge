@@ -24,6 +24,7 @@ from db.models import (
     RiskDecision,
     RiskReviewEvent,
     RiskIdempotencyRecord,
+    RiskReviewCase,
 )
 from db.repository import (
     AUDIT_RECORD_FIELDS,
@@ -643,8 +644,6 @@ def test_review_case_identity_cannot_be_changed_during_resolution(
 
     with pytest.raises(DBAPIError):
         with audit_repository.database.session_factory() as session:
-            from db.models import RiskReviewCase
-
             case = session.get(RiskReviewCase, case_id)
             case.id = case_id + 100
             case.status = "APPROVED"
