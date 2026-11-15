@@ -61,6 +61,24 @@ export interface ScoreResponse {
   history_transactions_used: number;
 }
 
+export interface AuditDecisionSummary {
+  id: number | null;
+  transaction_id: string;
+  risk_probability: number;
+  decision: Decision;
+  model_version: string;
+  feature_version: string;
+  policy_version: string;
+  created_at: string | null;
+}
+
+export interface AuditDecisionListResponse {
+  items: AuditDecisionSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface HealthResponse {
   status: "ok" | "unavailable";
   model_version?: string | null;
