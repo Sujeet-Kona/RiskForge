@@ -408,3 +408,46 @@ def test_the_driver_detail_is_kept_as_the_cause(audit_record: AuditRecord):
         repository.database.dispose()
 
     assert raised.value.__cause__ is not None
+
+
+
+def test_original_risk_decisions_are_database_enforced_append_only(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    decision_id = audit_repository.create_audit_record(audit_record)
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            decision = session.get(RiskDecision, decision_id)
+            decision.risk_probability = 0.5
+            session.commit()
+
+
+def test_a_resolved_review_case_cannot_return_to_pending(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+    audit_repository.resolve_review_case(
+        case_id=case_id,
+        outcome="APPROVED",
+        reviewer_id="reviewer-01",
+        comment=None,
+    )
+
+    from db.models import RiskReviewCase
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            case = session.get(RiskReviewCase, case_id)
+            case.status = "PENDING"
+            case.resolved_at = None
+            case.resolved_by = None
+            session.commit()

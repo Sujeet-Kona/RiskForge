@@ -140,6 +140,12 @@ class RiskReviewCase(Base):
             "status IN ('PENDING', 'APPROVED', 'REJECTED')",
             name="status_is_a_review_state",
         ),
+        CheckConstraint(
+            "(status = 'PENDING' AND resolved_at IS NULL AND resolved_by IS NULL) "
+            "OR (status IN ('APPROVED', 'REJECTED') AND resolved_at IS NOT NULL "
+            "AND resolved_by IS NOT NULL)",
+            name="resolution_fields_match_status",
+        ),
         Index("ix_risk_review_cases_status_created_at", "status", "created_at"),
     )
 

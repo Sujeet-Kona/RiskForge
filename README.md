@@ -224,9 +224,9 @@ Open http://127.0.0.1:5173. The Vite development proxy forwards `/api` requests
 to FastAPI at http://127.0.0.1:8000 by default. See
 [frontend setup](frontend/README.md) for configuration and deployment boundaries.
 
-The dashboard supports live scoring, result inspection, and persisted decision
-history. The human-review workflow remains planned backend work; the UI does not
-display fabricated history or operational metrics.
+The dashboard supports live scoring, result inspection, persisted decision
+history, and an authenticated manual-review queue. The UI does not display
+fabricated history or operational metrics.
 
 ## Verification
 

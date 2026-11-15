@@ -49,6 +49,12 @@ def upgrade() -> None:
             "status IN ('PENDING', 'APPROVED', 'REJECTED')",
             name=op.f("ck_risk_review_cases_status_is_a_review_state"),
         ),
+        sa.CheckConstraint(
+            "(status = 'PENDING' AND resolved_at IS NULL AND resolved_by IS NULL) "
+            "OR (status IN ('APPROVED', 'REJECTED') AND resolved_at IS NOT NULL "
+            "AND resolved_by IS NOT NULL)",
+            name=op.f("ck_risk_review_cases_resolution_fields_match_status"),
+        ),
         sa.ForeignKeyConstraint(
             ["decision_id"],
             ["risk_decisions.id"],
@@ -126,12 +132,41 @@ def upgrade() -> None:
         FOR EACH ROW EXECUTE FUNCTION riskforge_reject_audit_mutation();
         """
     )
+    op.execute(
+        """
+        CREATE FUNCTION riskforge_guard_review_case_transition()
+        RETURNS trigger AS $
+        BEGIN
+            IF OLD.status <> 'PENDING'
+               OR NEW.status NOT IN ('APPROVED', 'REJECTED') THEN
+                RAISE EXCEPTION 'RiskForge review cases only resolve once';
+            END IF;
+            IF NEW.decision_id <> OLD.decision_id
+               OR NEW.created_at <> OLD.created_at THEN
+                RAISE EXCEPTION 'RiskForge review case identity is immutable';
+            END IF;
+            RETURN NEW;
+        END;
+        $ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_risk_review_cases_one_way
+        BEFORE UPDATE ON risk_review_cases
+        FOR EACH ROW EXECUTE FUNCTION riskforge_guard_review_case_transition();
+        """
+    )
 
 
 def downgrade() -> None:
     op.execute(
         "DROP TRIGGER IF EXISTS trg_risk_review_events_append_only ON risk_review_events"
     )
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_risk_review_cases_one_way ON risk_review_cases"
+    )
+    op.execute("DROP FUNCTION IF EXISTS riskforge_guard_review_case_transition()")
     op.execute(
         "DROP TRIGGER IF EXISTS trg_risk_decisions_append_only ON risk_decisions"
     )

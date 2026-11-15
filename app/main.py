@@ -1,6 +1,6 @@
 """The RiskForge inference application.
 
-Two endpoints, one scoring path:
+Scoring, audit-history, and review endpoints over one scoring path:
 
 ``GET /health``
     Liveness, the identity of the loaded artifact, and whether the audit store is

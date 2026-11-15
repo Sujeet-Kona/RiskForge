@@ -90,6 +90,7 @@ function App() {
     setReviewLoading(true);
     setReviewError("");
     setReviewNotice("");
+    setReviewCases([]);
     try {
       const page = await getReviewQueue(reviewerKey.trim());
       setReviewCases(page.items);
@@ -112,11 +113,10 @@ function App() {
         outcome,
         reviewComments[caseId] ?? "",
       );
-      setReviewNotice(
-        `${response.case.transaction_id} recorded as ${response.case.status}. The original model decision remains REVIEW.`,
-      );
+      const successMessage = `${response.case.transaction_id} recorded as ${response.case.status}. The original model decision remains REVIEW.`;
       setReviewComments((current) => ({ ...current, [caseId]: "" }));
       await loadReviewQueue();
+      setReviewNotice(successMessage);
       await refreshHistory();
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : "Could not record review outcome");
@@ -240,7 +240,7 @@ function App() {
             <h1>Risk overview</h1>
             <p>Score transactions, inspect model signals and understand policy decisions.</p>
           </div>
-          <div className="date-chip"><Clock3 size={15} /> Live session</div>
+          <div className="date-chip"><Clock3 size={15} /> Local workspace</div>
         </section>
 
         <section className="metric-grid" aria-label="System status">
