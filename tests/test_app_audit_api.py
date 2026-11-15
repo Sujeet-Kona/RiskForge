@@ -377,6 +377,22 @@ def test_scoring_the_same_transaction_twice_records_both_decisions(
     assert count == 2
 
 
+def test_decision_history_reads_persisted_postgres_rows(
+    persisted_client, score_payload
+):
+    scored = _score(persisted_client, score_payload)
+
+    response = persisted_client.get(AUDIT_ROUTE, params={"decision": scored["decision"]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    item = body["items"][0]
+    assert item["id"] is not None
+    assert item["transaction_id"] == scored["transaction_id"]
+    assert item["created_at"] is not None
+
+
 def test_the_database_reports_itself_ready_through_health(persisted_client):
     body = persisted_client.get("/health").json()
 
