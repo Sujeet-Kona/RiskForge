@@ -367,6 +367,19 @@ class InMemoryAuditStore:
 
         return self.records[decision_id - 1]
 
+    def list_audit_records(
+        self, *, limit: int, offset: int, decision: str | None = None
+    ):
+        if self.failure is not None:
+            raise self.failure
+
+        matches = [
+            record
+            for record in reversed(self.records)
+            if decision is None or record.decision == decision
+        ]
+        return matches[offset : offset + limit], len(matches)
+
     def is_ready(self) -> bool:
         return self.ready
 
