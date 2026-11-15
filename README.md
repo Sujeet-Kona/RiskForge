@@ -52,6 +52,10 @@ flowchart TB
     POLICY --> AUDIT[(PostgreSQL decision record)]
     SHAP --> AUDIT
     AUDIT --> RESPONSE[Scoring response]
+    AUDIT -->|REVIEW only| CASE[(Review case)]
+    CASE --> REVIEWER[Authenticated reviewer]
+    REVIEWER --> EVENTS[(Append-only review event)]
+    AUDIT --> IDEMPOTENCY[(Idempotency response record)]
   end
   ARTIFACT -. loaded at startup .-> SCORE
   ARTIFACT -. calibrator .-> CALIBRATE
@@ -175,6 +179,20 @@ Policy research used synthetic assumptions: missed-fraud cost 100 units, false-d
 The request includes the current transaction and a history array. History timestamps must be strictly earlier than the current transaction; same-timestamp and future records are rejected. Only the trailing 24 hours affect behavioral features. The API accepts at most 2,000 history records and rejects larger requests rather than truncating them. top_k controls returned reason signals (default 3).
 
 The service loads a local artifact identified as xgb-001 / behavioral-v1. It contains preprocessing, XGBoost, the isotonic calibrator, and feature/model/policy metadata. A scoring request validates input, builds the 28-feature row, scores and calibrates it, applies policy-001, creates TreeSHAP and policy explanations, and persists the decision to PostgreSQL before returning success. REVIEW decisions also create a separate pending review case in the same database transaction. Missing or incompatible artifacts fail closed; audit-write failure prevents a successful response.
+
+### Idempotency
+
+The scoring endpoint accepts an optional `Idempotency-Key` header (8–128
+characters from letters, digits, `.`, `_`, `:`, and `-`). RiskForge hashes
+the canonical validated request body. Repeating the same key with the same
+request returns the original stored response without creating a second decision.
+Reusing that key for a different request returns HTTP 409. The decision, any
+REVIEW case, and the response snapshot are committed in one PostgreSQL
+transaction; a concurrent duplicate is resolved by the unique key constraint.
+
+Keys are global to this single-operator prototype and retained indefinitely.
+A production multi-tenant service would scope keys to an authenticated tenant
+and define an explicit retention/expiry policy.
 
 ### Human review
 
