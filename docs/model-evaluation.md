@@ -80,6 +80,13 @@ PYTHONPATH=. python scripts/evaluate_calibration.py
 PYTHONPATH=. python scripts/select_decision_policy.py
 ```
 
+The calibration evaluation also writes
+`reports/calibration/evaluation_metrics.json`. It records the raw and
+calibrated TEST Brier score, ECE, ranking metrics, the forward-chaining OOF
+metrics, and the exact relative Brier/ECE reductions computed from the same
+run. Use this generated artifact to verify percentage-improvement claims; do
+not infer the raw ECE baseline from the calibrated-only summary table.
+
 The benchmark writes:
 
 - `reports/model_benchmark/model_metrics.csv`
