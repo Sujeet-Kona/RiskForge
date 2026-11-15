@@ -217,6 +217,7 @@ def test_the_migration_creates_every_check_constraint(audit_database):
     assert reflected == {
         "ck_risk_decisions_risk_probability_in_unit_interval",
         "ck_risk_decisions_decision_is_a_policy_outcome",
+        "ck_risk_decisions_calibration_method_is_supported",
         "ck_risk_decisions_feature_count_is_positive",
         "ck_risk_decisions_history_used_is_not_negative",
         "ck_risk_decisions_top_k_is_positive",
