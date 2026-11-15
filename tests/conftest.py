@@ -696,7 +696,12 @@ def audit_repository(audit_database):
     from db.repository import AuditRepository
 
     with audit_database.engine.begin() as connection:
-        connection.execute(text(f"TRUNCATE TABLE {AUDIT_TABLE_NAME} RESTART IDENTITY"))
+        connection.execute(
+            text(
+                "TRUNCATE TABLE risk_review_events, risk_review_cases, "
+                f"{AUDIT_TABLE_NAME} RESTART IDENTITY"
+            )
+        )
 
     return AuditRepository(database=audit_database)
 

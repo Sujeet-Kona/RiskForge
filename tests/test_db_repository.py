@@ -14,15 +14,20 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from db.config import DatabaseConfig
-from db.models import AUDIT_TABLE_NAME, RiskDecision
+from db.models import (
+    AUDIT_TABLE_NAME,
+    RiskDecision,
+    RiskReviewEvent,
+)
 from db.repository import (
     AUDIT_RECORD_FIELDS,
     AuditPersistenceError,
     AuditRecord,
     AuditRepository,
+    ReviewConflictError,
 )
 from db.session import AuditDatabase
 
@@ -172,6 +177,98 @@ def test_the_same_transaction_identifier_may_be_recorded_twice(
     assert first != second
     assert audit_repository.get_audit_record(first).decision == "REVIEW"
     assert audit_repository.get_audit_record(second).decision == "BLOCK"
+
+
+def test_review_decision_creates_a_pending_case_and_can_be_resolved(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    decision_id = audit_repository.create_audit_record(audit_record)
+
+    cases, total = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+
+    assert total == 1
+    case = cases[0]
+    assert case.decision_id == decision_id
+    assert case.status == "PENDING"
+    assert case.decision.decision == "REVIEW"
+
+    resolved = audit_repository.resolve_review_case(
+        case_id=case.id,
+        outcome="APPROVED",
+        reviewer_id="reviewer-01",
+        comment="Manual review completed.",
+    )
+
+    assert resolved is not None
+    assert resolved.status == "APPROVED"
+    assert resolved.decision.decision == "REVIEW"
+    assert resolved.resolved_by == "reviewer-01"
+    assert resolved.resolution_comment == "Manual review completed."
+
+    with audit_repository.database.session_factory() as session:
+        event_total = session.query(RiskReviewEvent).filter_by(
+            review_case_id=case.id
+        ).count()
+    assert event_total == 1
+
+
+def test_a_review_case_cannot_be_resolved_twice(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+
+    audit_repository.resolve_review_case(
+        case_id=case_id,
+        outcome="REJECTED",
+        reviewer_id="reviewer-01",
+        comment=None,
+    )
+
+    with pytest.raises(ReviewConflictError):
+        audit_repository.resolve_review_case(
+            case_id=case_id,
+            outcome="APPROVED",
+            reviewer_id="reviewer-02",
+            comment=None,
+        )
+
+
+def test_review_events_are_database_enforced_append_only(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    audit_repository.resolve_review_case(
+        case_id=cases[0].id,
+        outcome="APPROVED",
+        reviewer_id="reviewer-01",
+        comment=None,
+    )
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            event = session.query(RiskReviewEvent).filter_by(
+                review_case_id=cases[0].id
+            ).one()
+            event.comment = "rewritten"
+            session.commit()
 
 
 def test_an_identifier_that_was_never_recorded_reads_back_as_none(
