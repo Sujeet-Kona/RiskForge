@@ -27,6 +27,12 @@ export function getHealth() {
   return request<HealthResponse>("/health");
 }
 
+export function getDecisionHistory(limit = 8) {
+  return request<import("./types").AuditDecisionListResponse>(
+    `/v1/audit/decisions?limit=${limit}&offset=0`,
+  );
+}
+
 export function scoreTransaction(payload: ScoreRequest) {
   return request<ScoreResponse>("/v1/risk/score", {
     method: "POST",
