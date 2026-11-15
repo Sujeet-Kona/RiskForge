@@ -730,7 +730,8 @@ def audit_repository(audit_database):
     with audit_database.engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE TABLE risk_review_events, risk_review_cases, "
+                "TRUNCATE TABLE risk_idempotency_records, risk_review_events, "
+                "risk_review_cases, "
                 f"{AUDIT_TABLE_NAME} RESTART IDENTITY"
             )
         )
