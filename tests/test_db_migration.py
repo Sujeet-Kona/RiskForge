@@ -19,7 +19,12 @@ from alembic import command
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 
-from db.models import AUDIT_TABLE_NAME, RiskDecision
+from db.models import (
+    AUDIT_TABLE_NAME,
+    RiskDecision,
+    RiskReviewCase,
+    RiskReviewEvent,
+)
 
 
 def _inspector(engine: Engine) -> Inspector:
@@ -75,8 +80,45 @@ def test_the_migration_and_the_models_have_not_drifted_apart(alembic_config):
 # --- what the migration builds ------------------------------------------------
 
 
-def test_the_migration_creates_the_audit_table(audit_database):
-    assert _user_tables(audit_database.engine) == {AUDIT_TABLE_NAME}
+def test_the_migration_creates_the_audit_and_review_tables(audit_database):
+    assert _user_tables(audit_database.engine) == {
+        AUDIT_TABLE_NAME,
+        "risk_review_cases",
+        "risk_review_events",
+    }
+
+
+def test_review_tables_have_exactly_the_modeled_columns(audit_database):
+    inspector = _inspector(audit_database.engine)
+    for table, model in (
+        ("risk_review_cases", RiskReviewCase),
+        ("risk_review_events", RiskReviewEvent),
+    ):
+        columns = inspector.get_columns(table)
+        assert {column["name"] for column in columns} == {
+            column.name for column in model.__table__.columns
+        }
+
+
+def test_postgres_enforces_append_only_decision_and_review_event_tables(audit_database):
+    from sqlalchemy import text
+
+    with audit_database.engine.connect() as connection:
+        triggers = set(
+            connection.execute(
+                text(
+                    "SELECT tgname FROM pg_trigger "
+                    "WHERE NOT tgisinternal AND tgname IN "
+                    "('trg_risk_decisions_append_only', "
+                    "'trg_risk_review_events_append_only')"
+                )
+            ).scalars()
+        )
+
+    assert triggers == {
+        "trg_risk_decisions_append_only",
+        "trg_risk_review_events_append_only",
+    }
 
 
 def test_the_table_has_exactly_the_modeled_columns(audit_database):
