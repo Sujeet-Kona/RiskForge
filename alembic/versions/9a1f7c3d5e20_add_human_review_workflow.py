@@ -135,7 +135,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE FUNCTION riskforge_guard_review_case_transition()
-        RETURNS trigger AS $
+        RETURNS trigger AS $rf$
         BEGIN
             IF OLD.status <> 'PENDING'
                OR NEW.status NOT IN ('APPROVED', 'REJECTED') THEN
@@ -147,7 +147,7 @@ def upgrade() -> None:
             END IF;
             RETURN NEW;
         END;
-        $ LANGUAGE plpgsql;
+        $rf$ LANGUAGE plpgsql;
         """
     )
     op.execute(
