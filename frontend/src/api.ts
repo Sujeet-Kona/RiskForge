@@ -10,6 +10,21 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
+// FastAPI validation errors retain their own detail array instead of the application envelope.
+function validationMessage(detail: unknown): string | null {
+  if (!Array.isArray(detail)) return null;
+
+  const reasons = detail.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const { loc, msg } = entry as { loc?: unknown; msg?: unknown };
+    if (typeof msg !== "string") return [];
+    const field = Array.isArray(loc) ? loc[loc.length - 1] : undefined;
+    return [typeof field === "string" ? `${field}: ${msg}` : msg];
+  });
+
+  return reasons.length > 0 ? reasons.join("; ") : null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -21,10 +36,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiError;
+    const body = (await response.json().catch(() => null)) as ApiError | null;
+    const detail = body?.detail;
     throw new Error(
-      body.error?.message ??
-        (typeof body.detail === "string" ? body.detail : `Request failed (${response.status})`),
+      body?.error?.message ??
+        (typeof detail === "string" ? detail : validationMessage(detail)) ??
+        `Request failed (${response.status})`,
     );
   }
 

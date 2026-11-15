@@ -102,3 +102,73 @@ body{background:linear-gradient(135deg,#f7f9fe 0%,#edf3fb 55%,#f8faff 100%);colo
   .environment-card{background:#ffffff0c;border-color:#ffffff20}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* These overrides follow both themes so their typography and focus styles take precedence. */
+:root{--muted:#5c6c85;--focus-ring:#2563eb}
+
+/* 11px — uppercase micro-labels and metadata that was 7px or 8px. */
+.brand small,.soon,.sidebar-foot,.metric-top,.section-kicker,.workspace-label,.eyebrow,
+.form-section-title,.field em,.decision-banner span,.probability-head,.thresholds,
+.signals-heading span,.signal-row small,.result-foot,.footer,.history-table th,
+.history-table td small,.history-decision,.review-case-id,.review-card-top p,
+.review-details small,.review-signals span,.result-meta span,.review-risk small,
+.review-details span{font-size:11px}
+.history-time{font-size:11px!important}
+
+/* Tracking was tuned for 8px type and looks loose at 11px. */
+.brand small{letter-spacing:1.2px}
+.workspace-label,.section-kicker,.eyebrow{letter-spacing:1.1px}
+.metric-top,.form-section-title,.policy-explanation span{letter-spacing:.8px}
+
+/* 12px — secondary copy that was 9px or 10px. */
+.environment-card small,.environment-card strong,.metric-caption,.metric-value small,
+.field,.form-hint,.disabled-note,.empty-checks span,.empty-result p,.decision-banner small,
+.signal-row strong,.signal-value,.muted-copy,.notice,.page-heading p,.panel-heading p,
+.system-status,.date-chip,.avatar,.result-meta strong,.history-empty,.history-table td,
+.history-table td strong,.secondary-button,.approve-button,.reject-button,
+.review-explanation,.review-details strong,.primary-button,
+.policy-explanation span,.policy-explanation p{font-size:12px}
+
+/* 16px — form controls, to keep iOS Safari from zooming on focus. */
+.field input,.field select,.field textarea{font-size:16px}
+.field textarea{line-height:1.55}
+.input-prefix b{top:11px;font-size:16px}
+
+/* Keep secondary text consistent across the light-theme components. */
+.breadcrumb,.slash,.page-heading p,.panel-heading p,.metric-top,.metric-value small,
+.metric-caption,.field em,.form-hint,.disabled-note,.select-chevron,.input-prefix b,
+.empty-result p,.thresholds,.result-meta span,.signals-heading span,.signal-row small,
+.result-foot,.muted-copy,.footer,.footer b,.history-empty,
+.history-table th,.history-table td small,.review-case-id,.review-card-top p,
+.review-risk small,.review-details span,.review-details small{color:var(--muted)}
+.history-time{color:var(--muted)!important}
+.field input::placeholder,.field textarea::placeholder{color:#64758f}
+/* Keeps its green meaning; the previous #0d9274 measured 3.90:1 on white. */
+.signal-value.down{color:#0a7a61}
+.primary-button{background:linear-gradient(100deg,#2563eb,#205bd0)}
+.primary-button:hover:not(:disabled){filter:none}
+.decision-banner span{opacity:1}
+
+/* Keep keyboard focus visible on both controls and navigation links. */
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+
+/* Live regions stay mounted while their text changes. */
+.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+.result-panel{position:relative}
+.panel{min-width:0}
+.result-foot,.signal-row>div,.review-card-top>div,.review-details>div{min-width:0;overflow-wrap:anywhere}
+.signal-row{gap:10px}
+.signal-value{flex-shrink:0}
+.history-decision{white-space:nowrap;flex-shrink:0}
+@media(max-width:520px){.review-card-top{flex-direction:column}.review-risk{text-align:left}.review-card-top p{flex-wrap:wrap}}
+
+.skip-link{position:absolute;left:12px;top:-60px;z-index:20;padding:10px 14px;border-radius:8px;background:#fff;color:#1b3150;font-size:12px;font-weight:700;text-decoration:none;box-shadow:0 6px 20px #18345b26;transition:top .15s}
+.skip-link:focus-visible{top:12px}
+
+/* The status chip carried real information, so it survives small screens and
+   the redundant breadcrumb goes instead. */
+@media(max-width:520px){.breadcrumb{display:none}.system-status{font-size:11px}.topbar{gap:10px}}
+
+/* Explicit hiding survives later font-size overrides. */
+@media(max-width:800px){.brand>span:last-child,.workspace-label{display:none}}
+@media(max-width:360px){.metric-grid{grid-template-columns:minmax(0,1fr)}}

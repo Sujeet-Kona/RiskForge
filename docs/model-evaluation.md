@@ -10,7 +10,7 @@ RiskForge was evaluated on the IEEE-CIS Fraud Detection dataset (590,540 transac
 | VALIDATION | 88,013 | 3,010 |
 | TEST | 88,081 | 3,065 |
 
-Preprocessing and estimators are fitted on TRAIN. Model comparison, calibration selection, and policy research use VALIDATION. TEST is reserved for final reporting.
+Preprocessing and estimators are fitted on TRAIN. Model comparison, calibration selection, and policy research use VALIDATION. TEST is reserved for final reporting. VALIDATION is therefore a **selection** partition, not an independent estimate — see [Reuse of the VALIDATION partition](#reuse-of-the-validation-partition).
 
 ## Model comparison
 
@@ -58,6 +58,15 @@ On TEST, raw versus calibrated XGBoost results were:
 
 Calibration targets probability reliability, not ranking. Isotonic's stepwise mapping can create tied probabilities and slightly change ranking metrics.
 
+A read-only aggregation of the historical temporal reliability-bin report on
+2026-11-15 produced global TEST ECE 0.2221975902987569 (raw) and
+0.0035530458027803274 (isotonic), each over 88,081 rows. This combines weighted
+predictions and outcomes within each bin across time segments before computing
+absolute gaps; averaging segment ECEs would be a different statistic. The raw
+value differs slightly from the historical table's 0.222200. The exact cause is
+not established, so the frozen table is retained and this discrepancy is
+explicit. Neither aggregation nor a new provenance record is a fresh model run.
+
 ## Decision policy
 
 The serving API uses the frozen `policy-001` thresholds:
@@ -70,9 +79,72 @@ The policy research uses synthetic false-positive, false-negative, and review as
 
 A forward-chaining validation search produced an experimental candidate with a 0.050 review threshold and 0.110 block threshold. It has not replaced `policy-001`; the active serving configuration remains unchanged.
 
+### Provenance of the frozen thresholds
+
+`policy-001` is immutable. This section records what the repository can and
+cannot establish about where its two thresholds came from, so that the gap is
+explicit rather than papered over. The machine-readable
+[provenance record](../reports/policy_provenance.json) is a retrospective record,
+not evidence of an original selection run.
+
+**Known and verifiable.**
+
+- The authoritative serving values are 0.075 and 0.110, defined by
+  `LOCKED_REVIEW_THRESHOLD` and `LOCKED_BLOCK_THRESHOLD` in `policy/locked.py`.
+- `policy/locked.py` was introduced already-locked in commit `34aceca`
+  ("Add FastAPI inference service"), the same commit that added the serving
+  layer, the artifact loader, and the parity script. There is no earlier commit
+  that derives, searches, or motivates 0.075.
+- The values are enforced at runtime: `app/service.py:196-235` refuses to start
+  against an artifact whose thresholds differ from `policy.locked`, and
+  `tests/test_serving_discipline.py:476-481` forbids the literals `0.075` and
+  `0.110` from appearing anywhere in `app/` or `db/`.
+- Boundary behaviour is exact and tested: ALLOW for `p < 0.075`, REVIEW for
+  `0.075 <= p < 0.110`, BLOCK for `p >= 0.110`.
+
+**Not established by this repository.**
+
+- The original rationale for choosing 0.075 as the REVIEW threshold is **not
+  recorded anywhere** — not in a commit message, a report, a script output, or
+  a document. It cannot be recovered from the code, and none is claimed here.
+- The 0.075 value is **not** the output of the cost-sensitive search described
+  below. That search selects 0.050.
+- No artifact links `scripts/select_decision_policy.py` to `policy/locked.py`.
+  The script does not import it, does not assert that its winner matches the
+  deployed thresholds, and **writes nothing to disk** — it is print-only, so
+  the search leaves no committed evidence.
+
+**The separate cost-search experiment.**
+
+`scripts/select_decision_policy.py` performs an exhaustive (not sampled) search
+over every feasible `(T_REVIEW, T_BLOCK)` pair with `T_REVIEW < T_BLOCK`, drawn
+from the empirical percentiles of forward-chaining out-of-fold VALIDATION
+scores plus a fixed interpretable grid. It uses the synthetic cost model in
+`policy/costs.py:88-93` — `C_FN=100`, `C_FP=10`, `C_REVIEW=5`, review fraud
+capture `e=0.70` — which that module states explicitly are project assumptions
+and not industry facts. TEST labels are read only after the search completes,
+and the script asserts the thresholds did not change (`:481-483`).
+
+Its selected candidate is `0.050 / 0.110`. The repository records only that
+this candidate "has not replaced `policy-001`". **No reason for that decision
+is recorded, and none is inferred here.**
+
+Adopting the search winner would change deployed behaviour, so it is treated as
+a separate future experiment requiring its own evidence, not as a correction to
+make silently.
+
 ## Reproduction
 
-With the IEEE-CIS files under `data/raw/ieee_cis/`, run:
+These optional research runs require `train_transaction.csv` under
+`data/raw/ieee_cis/` and the generated behavioral feature parquet. In a separate
+writable research checkout, generate it with
+`PYTHONPATH=. python scripts/build_behavioral_features.py` if needed. Do not run
+that writer through a data symlink into a protected checkout.
+
+The commands below refit models; benchmark and calibration evaluation can
+overwrite reports. Preserve existing evidence first. They are not prerequisites
+for starting an API with an existing serving artifact, and none was rerun for the
+local hardening verification documented in [verification](verification.md).
 
 ```bash
 PYTHONPATH=. python scripts/run_model_benchmark.py
@@ -87,6 +159,12 @@ metrics, and the exact relative Brier/ECE reductions computed from the same
 run. Use this generated artifact to verify percentage-improvement claims; do
 not infer the raw ECE baseline from the calibrated-only summary table.
 
+**This file is generated on demand and is not committed.** A clean clone does
+not contain `reports/calibration/`; regenerating it requires the gitignored
+IEEE-CIS inputs and refits the model. The raw-versus-calibrated TEST table in
+[Calibration](#calibration) above is therefore the committed historical record
+of those five numbers, and it is what the serving artifact was built against.
+
 The benchmark writes:
 
 - `reports/model_benchmark/model_metrics.csv`
@@ -100,6 +178,52 @@ and the Git commit (when run inside a Git checkout) into
 `run_metadata.json`. The committed metadata predates this addition and will
 gain those fields when the benchmark is next rerun with the local IEEE-CIS
 inputs. This does not package or redistribute the dataset.
+
+## Reuse of the VALIDATION partition
+
+VALIDATION was consulted repeatedly during development, and each consultation
+made a decision that changed what was subsequently measured on it:
+
+| Decision taken on VALIDATION | Where | Effect on VALIDATION scores |
+| --- | --- | --- |
+| Drop `D5` from the 28-feature contract | `ml/data/modeling.py:35-37` | feature set chosen to raise VALIDATION PR-AUC |
+| Choose isotonic over sigmoid calibration | `scripts/evaluate_calibration.py`, forward-chaining OOF | calibrator chosen to lower OOF Brier score |
+| Search the review/block threshold grid | `scripts/select_decision_policy.py` | thresholds chosen to minimize VALIDATION expected cost |
+| Rank XGBoost against Random Forest and Logistic Regression | `scripts/run_model_benchmark.py` | estimator chosen on the same partition |
+
+The consequence is that **VALIDATION PR-AUC is not an independent estimate of
+generalization.** It is a score on the data that selected the features, the
+calibrator, the estimator and the thresholds. Repeated selection on one finite
+partition biases that score upward, and nothing in this repository quantifies
+the bias: there is no nested cross-validation and no separate selection
+partition, so the optimistic component cannot be separated from the real one.
+
+The clearest instance is the `D5` removal, which was accepted because VALIDATION
+PR-AUC moved from 0.471864 to 0.474352 (+0.002488). That observed gain may
+reflect generalizable improvement, selection noise, or both on the same 88,013
+rows. The repository records the decision and measured change; it cannot
+establish how much belongs to either component.
+
+TEST is the only partition that no selection decision consulted. Its labels are
+withheld until the final reporting step (`scripts/select_decision_policy.py:163`
+skips TEST when labels are summarized, and the first TEST label read is
+`test_labels = split.test[TARGET_COLUMN]` at line 419 — after the winning
+thresholds have already been printed at lines 411-412). Lines 481-483 then abort
+if the thresholds differ from those pre-TEST values. **The TEST figures are the
+ones to quote.** The VALIDATION figure belongs in the record of how the model was
+built, not in a claim about how well it performs.
+
+The walk-forward experiment in [temporal evaluation](temporal_evaluation.md) is
+not a remedy for this. It retrains over expanding windows that overlap both
+VALIDATION and TEST, so it reuses the same rows a second time rather than
+providing a fresh partition. Its non-comparability with the locked benchmark is
+documented in `README.md`.
+
+Correcting this properly would mean a fourth partition or nested
+cross-validation for selection. Neither is implemented, and neither can be
+retrofitted without re-running feature and threshold selection — which would
+change the frozen model and invalidate every locked number above. It is recorded
+here as a known limitation of the evidence, not as a pending fix.
 
 ## Interpretation limits
 

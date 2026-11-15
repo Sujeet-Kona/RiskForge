@@ -4,27 +4,62 @@ React + TypeScript frontend for the existing RiskForge FastAPI scoring service.
 
 ## Local development
 
-1. Start PostgreSQL and apply the existing migration from the repository root.
-2. Build the frozen serving artifact using the documented offline pipeline.
-3. Start the API from the repository root:
+Use **Node.js 22.13+ on the 22.x line, or a compatible supported Node.js 24+ runtime**.
+jsdom 29 requires `^20.19.0 || ^22.13.0 || >=24.0.0`, but jest-dom 7 requires
+Node.js `>=22`; Node.js 20 is therefore insufficient for this project's tests.
+
+1. Follow [root local setup](../README.md#run-locally): export the root `.env`,
+   wait for a disposable local PostgreSQL server, verify the target database
+   before migrations, and complete the minimal serving-artifact build.
+2. Start the API from the repository root with that environment exported:
 
    ```bash
+   set -a
+   source .env
+   set +a
    uvicorn app.main:app --reload
    ```
 
-4. In a second terminal:
+3. In a second terminal:
 
    ```bash
    cd frontend
-   cp .env.example .env
-   npm install
+   [ -f .env ] || cp .env.example .env
+   npm ci
    npm run dev
    ```
 
-5. Open http://127.0.0.1:5173.
+4. Open http://127.0.0.1:5173.
 
-The Vite development server proxies `/api` requests to the FastAPI service. Set
-`RISKFORGE_API_TARGET` in `.env` if the API runs elsewhere.
+### API configuration and secrets
+
+Set these in `frontend/.env` (separate from the root backend `.env`):
+
+- `VITE_API_BASE_URL` is the browser's API base path, default `/api`. Vite embeds
+  `VITE_` values in the client bundle; changing them requires restarting the
+  dev server or rebuilding the deployed frontend.
+- `RISKFORGE_API_TARGET` is the development proxy's upstream, default
+  `http://127.0.0.1:8000`. The proxy strips `/api` before forwarding. It does not
+  configure production routing or change the browser's API base URL.
+
+Never put reviewer keys or other secrets in a `VITE_` variable. Configure
+`RISKFORGE_REVIEWER_API_KEY` only in the backend environment; enter the reviewer
+key in the dashboard at runtime, where it is held only in component memory.
+
+### Frontend checks
+
+After `npm ci`, run from `frontend/`:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+`npm test` runs Vitest once; `npm run test:watch` is available for local work.
+CI runs `npm ci`, `npm test` (Vitest) and `npm run build`, which type-checks
+with `tsc --noEmit` before the Vite production build. These tests mock API calls;
+they are not a browser end-to-end suite.
 
 ## Current scope
 

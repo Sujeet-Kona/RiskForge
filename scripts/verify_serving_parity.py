@@ -264,6 +264,20 @@ def select_examples(
     ]
 
 
+class ParityAuditStore:
+    """Keep parity-check decisions in memory; never touch PostgreSQL."""
+
+    def __init__(self) -> None:
+        self.records = []
+
+    def is_ready(self) -> bool:
+        return True
+
+    def create_audit_record(self, record) -> int:
+        self.records.append(record)
+        return len(self.records)
+
+
 def main() -> None:
     started = time.perf_counter()
 
@@ -345,7 +359,7 @@ def main() -> None:
 
     print_header("5/6", "Comparing the offline path with the API path")
 
-    application = create_app()
+    application = create_app(audit_store=ParityAuditStore())
     failures: list[str] = []
 
     with TestClient(application) as client:

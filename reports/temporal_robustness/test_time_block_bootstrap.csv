@@ -1,0 +1,3 @@
+comparison,metric,estimate,ci_95_low,ci_95_high,valid_replicates,requested_replicates,block_duration_seconds,method,seed
+xgboost_minus_random_forest,average_precision,0.02322025321761101,0.009564551679285672,0.03464102137169928,500,500,86400,paired_moving_time_block_percentile_bootstrap,20261107
+xgboost_minus_random_forest,roc_auc,0.00409765109371607,0.0003866215478306568,0.007418105182251565,500,500,86400,paired_moving_time_block_percentile_bootstrap,20261107

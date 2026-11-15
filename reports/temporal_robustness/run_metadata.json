@@ -1,0 +1,18 @@
+{
+  "dataset": "IEEE-CIS Fraud Detection",
+  "walk_forward": {
+    "n_splits": 4,
+    "test_fraction_of_distinct_timestamps_per_fold": 0.1,
+    "initial_train_fraction_of_distinct_timestamps": 0.6,
+    "strategy": "expanding training window; each test window is strictly later",
+    "timestamp_ties_preserved": true
+  },
+  "time_block_bootstrap": {
+    "replicates_requested": 500,
+    "block_duration_seconds": 86400,
+    "seed": 20261107,
+    "method": "paired moving blocks of complete distinct TransactionDT groups",
+    "duration_units": "TransactionDT elapsed-time units (seconds)"
+  },
+  "interpretation": "Walk-forward folds are repeated historical simulations, not independent datasets. Block-bootstrap intervals quantify uncertainty conditional on this holdout and chosen block length; they do not establish future or live payment performance."
+}

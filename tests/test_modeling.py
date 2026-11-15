@@ -1,3 +1,6 @@
+import csv
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -9,6 +12,31 @@ from ml.data.modeling import (
     NUMERIC_FEATURES,
     build_modeling_frame,
 )
+
+
+CONTRACT_CSV = (
+    Path(__file__).resolve().parents[1] / "ml" / "data" / "feature_contract.csv"
+)
+
+MODEL_STATUS = "MODEL"
+
+DECLARED_STATUSES = {
+    MODEL_STATUS,
+    "INPUT_ONLY",
+    "ENGINEERED_UNUSED",
+    "CANDIDATE_REJECTED",
+}
+
+
+def read_contract_rows() -> list[dict[str, str]]:
+    with CONTRACT_CSV.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def contract_features_with_status(status: str) -> list[str]:
+    return [
+        row["feature"] for row in read_contract_rows() if row["status"] == status
+    ]
 
 
 def make_behavioral_frame() -> pd.DataFrame:
@@ -245,3 +273,68 @@ def test_missing_label_is_rejected():
 
     with pytest.raises(ValueError, match="row count"):
         build(labels=labels)
+
+
+def test_the_documented_contract_selects_exactly_the_model_features():
+    """The CSV describes the contract; ``MODEL_FEATURES`` decides it.
+
+    A documented feature that the model never receives, or a model feature the
+    documentation never mentions, is how a contract quietly stops describing the
+    shipped pipeline. Both directions are checked in one place so the CSV cannot
+    drift into becoming a second source of truth.
+    """
+    documented = contract_features_with_status(MODEL_STATUS)
+
+    assert set(documented) == set(MODEL_FEATURES)
+    assert len(documented) == len(MODEL_FEATURES) == 28
+
+
+def test_the_contract_csv_names_each_column_once():
+    names = [row["feature"] for row in read_contract_rows()]
+
+    assert len(names) == len(set(names))
+
+
+def test_every_contract_row_declares_a_known_status():
+    """An undeclared status would silently drop a row out of the check above."""
+    undeclared = {
+        row["status"] for row in read_contract_rows()
+    } - DECLARED_STATUSES
+
+    assert undeclared == set()
+
+
+def test_the_contract_csv_documents_the_categorical_numeric_partition():
+    rows = read_contract_rows()
+    model_rows = [row for row in rows if row["status"] == MODEL_STATUS]
+
+    categorical = {
+        row["feature"] for row in model_rows if row["category"] == "categorical"
+    }
+
+    assert categorical == set(CATEGORICAL_FEATURES)
+    assert {row["feature"] for row in model_rows} - categorical == set(
+        NUMERIC_FEATURES
+    )
+
+
+def test_columns_built_but_not_selected_are_marked_as_such():
+    """Materialized-and-dropped is a real state; hiding it reads as an omission."""
+    engineered_unused = set(contract_features_with_status("ENGINEERED_UNUSED"))
+
+    assert {"transaction_day_index", "address_has_history_24h"} == engineered_unused
+    assert engineered_unused.isdisjoint(MODEL_FEATURES)
+
+
+def test_rejected_candidates_are_never_model_features():
+    rejected = set(contract_features_with_status("CANDIDATE_REJECTED"))
+
+    assert "D5" in rejected
+    assert rejected.isdisjoint(MODEL_FEATURES)
+
+
+def test_identifiers_are_documented_as_inputs_only():
+    inputs_only = set(contract_features_with_status("INPUT_ONLY"))
+
+    assert {"TransactionDT", "card1", "addr1", "addr2"} == inputs_only
+    assert inputs_only.isdisjoint(MODEL_FEATURES)

@@ -153,7 +153,9 @@ The TEST Brier score decreased by approximately **76.1%**. Calibration improves 
 
 The benchmark reports descriptive TEST slices by chronological period, transaction-amount bands, ProductCD, and card-history groups. These are slices of the same holdout, not independent validation datasets. See the [segment report](reports/model_benchmark/test_segment_metrics.csv).
 
-An additional expanding-window evaluation, paired moving-time-block bootstrap, and segmented calibration reliability reports are documented in [temporal evaluation](docs/temporal_evaluation.md). They require the IEEE-CIS source data. No additional robustness metrics are claimed until those runs complete.
+An additional expanding-window evaluation, paired moving-time-block bootstrap, and segmented calibration reliability reports are documented in [temporal evaluation](docs/temporal_evaluation.md) and committed under [reports/temporal_robustness/](reports/temporal_robustness/). Across four expanding folds XGBoost averaged **0.4940** Average Precision (std 0.0524, range 0.4244–0.5449) and **0.8884** ROC-AUC, against Random Forest at 0.4629 and 0.8834.
+
+These walk-forward figures are **not comparable to the locked TEST benchmark above** and must not be quoted alongside it. The expanding window overtakes the locked split boundaries: fold 3 trains on 58,741 rows of the locked VALIDATION period, and fold 4's training window includes 29,419 rows — 33.4% — of the locked 88,081-row TEST partition. They are repeated historical simulations on one finite dataset, not independent out-of-sample estimates. Regenerating them requires the gitignored IEEE-CIS source data; the committed CSVs are historical artifacts whose configuration and internal arithmetic have been checked against the generating code, but whose exact floats have not been re-derived here.
 
 ## Decision policy
 
@@ -166,6 +168,8 @@ The serving path applies the frozen policy-001 thresholds to calibrated probabil
 | BLOCK | p ≥ 0.110 |
 
 Policy research used synthetic assumptions: missed-fraud cost 100 units, false-decline cost 10 units, manual-review cost 5 units, and 70% assumed fraud capture by review. These are experimental inputs, not measured payment-network economics. The policy is amount-blind and should not be interpreted as a validated real-world payment policy.
+
+The original rationale for the 0.075 REVIEW threshold is **not recorded in this repository**, and the cost-sensitive search described above selects 0.050, not 0.075. That gap is documented explicitly rather than retrofitted with a justification — see [policy provenance](docs/model-evaluation.md#provenance-of-the-frozen-thresholds) and the [machine-readable provenance record](reports/policy_provenance.json). `policy-001` is treated as immutable absent a separate, evidence-backed experiment.
 
 ## Inference API
 
@@ -210,7 +214,17 @@ PostgreSQL triggers reject UPDATE/DELETE against the original risk decision and
 review-event tables; they do not make the database tamper-proof against a
 database administrator.
 
-Run the API with the local environment file loaded when using these settings:
+To configure the local credential, fill the empty `RISKFORGE_REVIEWER_API_KEY=`
+line in the git-ignored root `.env` with a random key without printing it, and
+restrict the file to your user:
+
+```bash
+python -c "import pathlib,re,secrets; p=pathlib.Path('.env'); p.write_text(re.sub(r'(?m)^RISKFORGE_REVIEWER_API_KEY=.*$', 'RISKFORGE_REVIEWER_API_KEY=' + secrets.token_urlsafe(32), p.read_text()))"
+chmod 600 .env
+```
+
+The API does not load `.env` itself. Export it in the shell that starts the API,
+and restart the API after changing either reviewer variable:
 
 ```bash
 set -a
@@ -218,6 +232,11 @@ source .env
 set +a
 uvicorn app.main:app --reload
 ```
+
+To enter the key in the dashboard, read it locally from `.env`
+(`grep '^RISKFORGE_REVIEWER_API_KEY=' .env | cut -d= -f2-`). Never commit it or
+paste it into issues, logs or chat. Without both variables the review endpoints
+return 503; a missing or wrong key returns 401.
 
 
 TreeSHAP contributions are calculated on the raw XGBoost output margin (log-odds) and mapped back to the original 28 contract features. They are local model signals, not causal explanations, and are not calibrated-probability contributions. The policy explanation separately identifies the probability threshold band that produced the action.
@@ -233,18 +252,19 @@ calibration, explainability, or policy logic.
 
 After starting PostgreSQL, building the serving artifact, and starting FastAPI
 as described in [Run locally](#run-locally), start the dashboard in another
-terminal:
+terminal (Node.js 22.13+ on 22.x, or a compatible supported 24+ runtime):
 
 ```bash
 cd frontend
-cp .env.example .env
-npm install
+[ -f .env ] || cp .env.example .env
+npm ci
 npm run dev
 ```
 
 Open http://127.0.0.1:5173. The Vite development proxy forwards `/api` requests
 to FastAPI at http://127.0.0.1:8000 by default. See
-[frontend setup](frontend/README.md) for configuration and deployment boundaries.
+[frontend setup](frontend/README.md) for API configuration, secret handling,
+local typecheck/test/build commands, and deployment boundaries.
 
 The dashboard supports live scoring, result inspection, persisted decision
 history, and an authenticated manual-review queue. The UI does not display
@@ -254,9 +274,11 @@ fabricated history or operational metrics.
 
 The recorded local offline-to-API parity check compared three real VALIDATION transactions: one ALLOW, one REVIEW, and one BLOCK. All 28 feature values matched between offline and API paths. Probabilities, decisions, reason codes, and policy explanations also matched. The largest absolute difference in the two floating-point amount-sum features was 1.310 × 10⁻¹⁰, within the 10⁻⁹ absolute tolerance.
 
-This is a targeted three-case parity check, not exhaustive proof for all possible inputs or caller-supplied histories.
+This is a targeted three-case parity check, not exhaustive proof for all possible inputs or caller-supplied histories. See the [verification record](docs/verification.md) for evidence and limitations.
 
-CI runs Ruff, Python compilation, Alembic migration/schema checks, and pytest with PostgreSQL 17. CI does not download IEEE-CIS, train models, build the serving artifact, run the real-data parity script, connect to an MLflow server, or deploy the API.
+**Before running pytest:** `tests/conftest.py` always derives `riskforge_test` on the configured database server, regardless of the database name in `DATABASE_URL`. It may create, downgrade, rebuild, and truncate that database. Use a disposable **LOCAL** server only, verify the target first, and set `RISKFORGE_REQUIRE_POSTGRES=1` to prevent silent database-test skips. Follow the [database safety and check instructions](docs/reproducibility.md#local-api-and-database-checks).
+
+CI runs Ruff, Python compilation, Alembic migration/schema checks, and pytest with PostgreSQL 17. The frontend job installs dependencies from the committed lockfile with `npm ci`, runs the Vitest suite with `npm test`, then type-checks and creates the production build with `npm run build`. The frontend tests mock API calls; CI does not run a browser end-to-end suite. CI does not download IEEE-CIS, train models, build the serving artifact, run the real-data parity script, connect to an MLflow server, or deploy the API.
 
 ## Technology
 
@@ -264,7 +286,8 @@ Python 3.12 · pandas · NumPy · PyArrow · scikit-learn · XGBoost · SHAP/Tre
 
 ## Run locally
 
-Requirements: Python 3.12, Docker Compose, and the IEEE-CIS source CSV files.
+Requirements: Python 3.12, Docker Compose with `--wait` support, and the IEEE-CIS
+source data for building the serving artifact.
 
 ~~~bash
 git clone https://github.com/Sujeet-Kona/RiskForge.git
@@ -273,35 +296,59 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-cp .env.example .env
-docker compose up -d
-.venv/bin/alembic upgrade head
+[ -f .env ] || cp .env.example .env
 ~~~
 
-Place the Kaggle competition CSV files under data/raw/ieee_cis/. The dataset, generated behavioral Parquet file, and serving artifact are not committed.
+Review the root `.env` before sourcing it. Use a **disposable LOCAL PostgreSQL
+server only**: match `DATABASE_URL` host, port, database, and role to the Compose
+settings. Do not use a remote/shared server or an existing user database.
+Compose reuses its named volume; if existing data is not explicitly disposable,
+stop and provision an isolated local server instead.
 
-Build local features and the serving artifact:
-
-~~~bash
-PYTHONPATH=. python scripts/inspect_dataset.py
-PYTHONPATH=. python scripts/build_behavioral_features.py
-PYTHONPATH=. python scripts/evaluate_calibration.py
-PYTHONPATH=. python scripts/select_decision_policy.py
-PYTHONPATH=. python scripts/build_serving_artifact.py
-~~~
-
-Run the candidate benchmark separately:
-
-~~~bash
-PYTHONPATH=. python scripts/run_model_benchmark.py
-~~~
-
-Start the API:
+Python and Alembic do **not** automatically load `.env`. Export it before any
+migration, then wait for PostgreSQL readiness:
 
 ~~~bash
 set -a
 source .env
 set +a
+docker compose up -d --wait postgres
+docker compose port postgres 5432
+~~~
+
+Stop on any error. Complete the
+[read-only database target check](docs/reproducibility.md#local-api-and-database-checks)
+and confirm the published port, database, and role belong to this disposable
+local server. **Only then**, in the same exported environment, apply migrations:
+
+~~~bash
+.venv/bin/alembic upgrade head
+.venv/bin/alembic check
+~~~
+
+Place the Kaggle source files under `data/raw/ieee_cis/` as described in
+[dataset inputs](docs/reproducibility.md#dataset-inputs). The minimal serving
+build needs `train_transaction.csv`; dataset inspection additionally needs
+`train_identity.csv`. Data, generated behavioral features, and the fitted
+serving artifact are not committed.
+
+The minimal serving build has two commands:
+
+~~~bash
+PYTHONPATH=. python scripts/build_behavioral_features.py
+PYTHONPATH=. python scripts/build_serving_artifact.py
+~~~
+
+The artifact builder fits the locked model on TRAIN and the isotonic calibrator
+on VALIDATION. It does not require benchmark, calibration-evaluation, or policy
+research reports. Dataset inspection is optional; separate research scripts
+refit models and may overwrite reports. See
+[optional research and report regeneration](docs/reproducibility.md#optional-research-and-report-regeneration)
+before running them.
+
+Start the API in the same exported environment:
+
+~~~bash
 uvicorn app.main:app --reload
 ~~~
 
@@ -334,7 +381,11 @@ Open http://127.0.0.1:8000/docs for the local API schema. The API does not train
 
 ## Further documentation
 
+- [API contract and examples](docs/api.md)
+- [Interview guide](docs/interview-guide.md)
+- [Verification record](docs/verification.md)
 - [Model evaluation](docs/model-evaluation.md)
 - [System design](docs/system-design.md)
 - [Reproducibility](docs/reproducibility.md)
 - [Temporal evaluation](docs/temporal_evaluation.md)
+- [Policy provenance record](reports/policy_provenance.json)

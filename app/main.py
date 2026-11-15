@@ -29,7 +29,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.audit import (
     AUDIT_UNAVAILABLE_MESSAGE,
@@ -93,6 +95,30 @@ INFERENCE_FAILED_MESSAGE = (
     "are being returned; a failure is never reported as a score."
 )
 
+UNAUTHENTICATED = "unauthenticated"
+NOT_FOUND = "not_found"
+METHOD_NOT_ALLOWED = "method_not_allowed"
+CONFLICT = "conflict"
+REVIEWER_UNCONFIGURED = "reviewer_unconfigured"
+FALLBACK_ERROR_CODE = "request_failed"
+
+REVIEWER_CREDENTIALS_REQUIRED_MESSAGE = (
+    "Valid reviewer credentials are required."
+)
+RESOURCE_NOT_FOUND_MESSAGE = "The requested resource was not found."
+METHOD_NOT_ALLOWED_MESSAGE = (
+    "This method is not allowed on the requested resource."
+)
+CONFLICT_MESSAGE = (
+    "The request conflicts with a decision or review case that has already "
+    "been recorded."
+)
+REVIEWER_UNCONFIGURED_MESSAGE = (
+    "Human-review operations are disabled until reviewer credentials are "
+    "configured."
+)
+REQUEST_FAILED_MESSAGE = "The request could not be completed."
+
 API_DESCRIPTION = f"""
 Scores a transaction with the locked RiskForge pipeline: the 28-feature
 point-in-time contract, the XGBoost model fitted on TRAIN only, the isotonic
@@ -102,9 +128,9 @@ Phase 5 reason codes.
 {HISTORY_NOTE}
 
 Every decision that is returned has first been written to a PostgreSQL audit
-store, so it can be reconstructed later. The database records decisions; it never
-supplies a feature. A decision that cannot be recorded is reported as a 503
-failure rather than returned unaudited.
+store. Prior-history rows are not retained, so the record alone cannot replay
+the full score. The database never supplies a feature. A decision that cannot
+be recorded is reported as a 503 failure rather than returned unaudited.
 
 The model, calibration and preprocessing are loaded once at startup from a frozen
 artifact. This service never trains, never fits a calibrator and never falls back
@@ -359,6 +385,75 @@ def create_app(
             status_code=503,
             code=error.code,
             message=AUDIT_UNAVAILABLE_MESSAGE,
+        )
+
+    @application.exception_handler(StarletteHTTPException)
+    async def http_error(
+        request: Request,
+        error: StarletteHTTPException,
+    ) -> JSONResponse:
+        """Render an ``HTTPException`` in the same envelope as every other failure.
+
+        Registered on the Starlette base class so the framework's own 404 and 405
+        are covered too, not only the raises in this module.
+
+        Each branch names its message constant literally rather than reading
+        ``error.detail``, because
+        ``test_every_client_facing_error_message_is_a_module_level_constant``
+        requires that no runtime-composed string reaches a caller. The status is
+        what selects the message, so a 409 from the score route and a 409 from
+        the review route share one wording; the request path already tells the
+        caller which resource conflicted.
+
+        422 is deliberately left in FastAPI's own ``{"detail": [...]}`` shape by
+        delegating to the framework handler. Request-validation failures carry
+        the schema's point-in-time rejection reason, and two tests require that
+        reason to reach the caller — see ``docs/system-design.md``.
+        """
+        status = error.status_code
+
+        if status == 422:
+            return await http_exception_handler(request, error)
+
+        if status == 401:
+            return _error_response(
+                status_code=status,
+                code=UNAUTHENTICATED,
+                message=REVIEWER_CREDENTIALS_REQUIRED_MESSAGE,
+            )
+
+        if status == 404:
+            return _error_response(
+                status_code=status,
+                code=NOT_FOUND,
+                message=RESOURCE_NOT_FOUND_MESSAGE,
+            )
+
+        if status == 405:
+            return _error_response(
+                status_code=status,
+                code=METHOD_NOT_ALLOWED,
+                message=METHOD_NOT_ALLOWED_MESSAGE,
+            )
+
+        if status == 409:
+            return _error_response(
+                status_code=status,
+                code=CONFLICT,
+                message=CONFLICT_MESSAGE,
+            )
+
+        if status == 503:
+            return _error_response(
+                status_code=status,
+                code=REVIEWER_UNCONFIGURED,
+                message=REVIEWER_UNCONFIGURED_MESSAGE,
+            )
+
+        return _error_response(
+            status_code=status,
+            code=FALLBACK_ERROR_CODE,
+            message=REQUEST_FAILED_MESSAGE,
         )
 
     @application.exception_handler(Exception)

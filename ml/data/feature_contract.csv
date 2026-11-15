@@ -1,46 +1,53 @@
 feature,category,source,status,missing_strategy,transformation,point_in_time_rule,notes
-TransactionAmt,transaction,train_transaction,KEEP,none,log1p_candidate,available_at_transaction_time,Core transaction amount
-TransactionDT,time,train_transaction,TRANSFORM,none,derive_temporal_features,available_at_transaction_time,Elapsed seconds; raw value excluded from model
-transaction_hour_bucket,time_derived,TransactionDT,ENGINEERED,none,relative_hour_bucket,available_at_transaction_time,Derived from elapsed seconds; not an absolute clock hour
-transaction_day_index,time_derived,TransactionDT,ENGINEERED,none,elapsed_day_index,available_at_transaction_time,Derived elapsed-day index; preserves relative time ordering
-transaction_day_mod7,time_derived,TransactionDT,ENGINEERED,none,modulo_7_day_index,available_at_transaction_time,Relative modulo-7 index; not claimed to represent a real weekday
-amount_log1p,transaction_derived,TransactionAmt,ENGINEERED,none,log1p,available_at_transaction_time,Log-transformed transaction amount
-card_txn_count_1h,behavioral,card1+TransactionDT,ENGINEERED,zero,rolling_count_1h,strictly_prior_transaction_dt,Counts prior transactions for the same card1 within the previous hour; same timestamp excluded
-card_txn_count_24h,behavioral,card1+TransactionDT,ENGINEERED,zero,rolling_count_24h,strictly_prior_transaction_dt,Counts prior transactions for the same card1 within the previous 24 hours; same timestamp excluded
-card_amount_sum_24h,behavioral,card1+TransactionDT,ENGINEERED,zero,rolling_amount_sum_24h,strictly_prior_transaction_dt,Sums prior transaction amounts for the same card1 within the previous 24 hours; same timestamp excluded
-card_has_history_1h,behavioral,card1+TransactionDT,ENGINEERED,false,history_indicator_1h,strictly_prior_transaction_dt,True when at least one valid prior card transaction exists within the previous hour
-card_has_history_24h,behavioral,card1+TransactionDT,ENGINEERED,false,history_indicator_24h,strictly_prior_transaction_dt,True when at least one valid prior card transaction exists within the previous 24 hours
-address_txn_count_1h,behavioral,"addr1+addr2+TransactionDT",ENGINEERED,zero,rolling_count_1h,strictly_prior_transaction_dt,Counts prior transactions for the same complete address key within the previous hour; incomplete keys receive zero history
-address_txn_count_24h,behavioral,"addr1+addr2+TransactionDT",ENGINEERED,zero,rolling_count_24h,strictly_prior_transaction_dt,Counts prior transactions for the same complete address key within the previous 24 hours; incomplete keys receive zero history
-address_amount_sum_24h,behavioral,"addr1+addr2+TransactionDT",ENGINEERED,zero,rolling_amount_sum_24h,strictly_prior_transaction_dt,Sums prior transaction amounts for the same complete address key within the previous 24 hours; incomplete keys receive zero history
-address_has_history_1h,behavioral,"addr1+addr2+TransactionDT",ENGINEERED,false,history_indicator_1h,strictly_prior_transaction_dt,True when at least one valid prior complete-address transaction exists within the previous hour
-address_has_history_24h,behavioral,"addr1+addr2+TransactionDT",ENGINEERED,false,history_indicator_24h,strictly_prior_transaction_dt,True when at least one valid prior complete-address transaction exists within the previous 24 hours
-C1,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C2,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C3,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C4,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C5,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C6,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C7,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C8,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C9,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C10,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C11,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C12,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C13,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-C14,benchmark_numeric,train_transaction,CANDIDATE,none,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D1,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D2,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D3,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D4,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D5,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D6,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D7,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D8,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D9,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D10,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D11,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D12,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D13,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D14,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
-D15,benchmark_numeric,train_transaction,CANDIDATE,preserve_missingness,model_dependent,benchmark_feature,Original upstream semantics undocumented
+TransactionAmt,transaction,train_transaction,MODEL,none,used_raw_and_log1p,available_at_transaction_time,Core transaction amount; also the basis of amount_log1p and of the rolling amount sums
+TransactionDT,time,train_transaction,INPUT_ONLY,none,derive_temporal_features,available_at_transaction_time,Elapsed seconds; drives the chronological split and every temporal derivation but is deliberately absent from MODEL_FEATURES
+card1,identifier,train_transaction,INPUT_ONLY,none,none,available_at_transaction_time,Grouping key for the card behavioural window; an identifier and never a model feature
+addr1,identifier,train_transaction,INPUT_ONLY,none,none,available_at_transaction_time,First half of the complete address key; never a model feature on its own
+addr2,identifier,train_transaction,INPUT_ONLY,none,none,available_at_transaction_time,Second half of the complete address key; never a model feature on its own
+transaction_hour_bucket,time_derived,TransactionDT,MODEL,none,relative_hour_bucket,available_at_transaction_time,Derived from elapsed seconds; not an absolute clock hour
+transaction_day_index,time_derived,TransactionDT,ENGINEERED_UNUSED,none,elapsed_day_index,available_at_transaction_time,Materialized by ml/features/behavioral.py and persisted but not selected; the model carries transaction_day_mod7 instead
+transaction_day_mod7,time_derived,TransactionDT,MODEL,none,modulo_7_day_index,available_at_transaction_time,Relative modulo-7 index; not claimed to represent a real weekday
+amount_log1p,transaction_derived,TransactionAmt,MODEL,none,log1p,available_at_transaction_time,Log-transformed transaction amount
+card_txn_count_1h,behavioral,card1+TransactionDT,MODEL,zero_at_construction,rolling_count_1h,strictly_prior_transaction_dt,Counts prior transactions for the same card1 within the previous hour; same timestamp excluded
+card_txn_count_24h,behavioral,card1+TransactionDT,MODEL,zero_at_construction,rolling_count_24h,strictly_prior_transaction_dt,Counts prior transactions for the same card1 within the previous 24 hours; same timestamp excluded
+card_amount_sum_24h,behavioral,card1+TransactionDT,MODEL,zero_at_construction,rolling_amount_sum_24h,strictly_prior_transaction_dt,Sums prior transaction amounts for the same card1 within the previous 24 hours; same timestamp excluded
+card_has_history_1h,behavioral,card1+TransactionDT,MODEL,false_at_construction,history_indicator_1h,strictly_prior_transaction_dt,True when at least one valid prior card transaction exists within the previous hour
+card_has_history_24h,behavioral,card1+TransactionDT,MODEL,false_at_construction,history_indicator_24h,strictly_prior_transaction_dt,True when at least one valid prior card transaction exists within the previous 24 hours
+address_txn_count_1h,behavioral,"addr1+addr2+TransactionDT",MODEL,zero_at_construction,rolling_count_1h,strictly_prior_transaction_dt,Counts prior transactions for the same complete address key within the previous hour; incomplete keys receive zero history
+address_txn_count_24h,behavioral,"addr1+addr2+TransactionDT",MODEL,zero_at_construction,rolling_count_24h,strictly_prior_transaction_dt,Counts prior transactions for the same complete address key within the previous 24 hours; incomplete keys receive zero history
+address_amount_sum_24h,behavioral,"addr1+addr2+TransactionDT",MODEL,zero_at_construction,rolling_amount_sum_24h,strictly_prior_transaction_dt,Sums prior transaction amounts for the same complete address key within the previous 24 hours; incomplete keys receive zero history
+address_has_history_1h,behavioral,"addr1+addr2+TransactionDT",MODEL,false_at_construction,history_indicator_1h,strictly_prior_transaction_dt,True when at least one valid prior complete-address transaction exists within the previous hour
+address_has_history_24h,behavioral,"addr1+addr2+TransactionDT",ENGINEERED_UNUSED,false_at_construction,history_indicator_24h,strictly_prior_transaction_dt,Materialized and persisted but not selected; card_has_history_24h and address_has_history_1h carry the chosen signals
+ProductCD,categorical,train_transaction,MODEL,constant_missing_token_then_one_hot,one_hot_handle_unknown_ignore,available_at_transaction_time,Upstream product code; original semantics undocumented in the source dataset
+card6,categorical,train_transaction,MODEL,constant_missing_token_then_one_hot,one_hot_handle_unknown_ignore,available_at_transaction_time,Upstream card type label; original semantics undocumented in the source dataset
+P_emaildomain,categorical,train_transaction,MODEL,constant_missing_token_then_one_hot,one_hot_handle_unknown_ignore,available_at_transaction_time,Purchaser email domain; a missing domain is an explicit __MISSING__ level rather than a dropped row
+R_emaildomain,categorical,train_transaction,MODEL,constant_missing_token_then_one_hot,one_hot_handle_unknown_ignore,available_at_transaction_time,Recipient email domain; frequently absent and therefore mostly the __MISSING__ level
+C1,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+C2,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+C11,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+C13,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+D2,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+D3,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+D4,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+D8,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+D10,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+D11,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+D15,benchmark_numeric,train_transaction,MODEL,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Selected into the contract; original upstream semantics undocumented
+C3,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+C4,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+C5,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+C6,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+C7,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+C8,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+C9,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+C10,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+C12,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+C14,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+D1,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+D5,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Removed by validation-only backward elimination; validation PR-AUC improved 0.471864 -> 0.474352 and the locked TEST partition was never consulted
+D6,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+D7,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+D9,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+D12,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+D13,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented
+D14,benchmark_numeric,train_transaction,CANDIDATE_REJECTED,median_fill_with_missing_indicator,model_dependent,benchmark_feature,Profiled as a candidate and not selected; original upstream semantics undocumented

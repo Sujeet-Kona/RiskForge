@@ -1,3 +1,11 @@
+"""The authoritative feature contract.
+
+Membership *and* order of the model features are defined here and nowhere else.
+``ml/data/feature_contract.csv`` describes the same columns — their derivation,
+missing-value handling and point-in-time rule — but it does not decide which of
+them the model receives; ``tests/test_modeling.py`` fails if the two disagree.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
