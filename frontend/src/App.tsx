@@ -132,6 +132,11 @@ function App() {
   }, []);
 
   const apiReady = health?.status === "ok" && health.database === "ready";
+  const systemStatusLabel = health?.status !== "ok"
+    ? "API unavailable"
+    : health.database !== "ready"
+      ? "Audit store unavailable"
+      : "Scoring ready";
   const probability = result ? result.risk_probability * 100 : null;
   const decision = result ? decisionMeta[result.decision] : null;
   const ResultIcon = decision?.icon;
@@ -231,7 +236,7 @@ function App() {
           <div className="breadcrumb"><span>Workspace</span><span className="slash">/</span><strong>Overview</strong></div>
           <div className="topbar-actions">
             <div className={`system-status ${apiReady ? "online" : "offline"}`}>
-              <span className="status-dot" /> {apiReady ? "API operational" : "API unavailable"}
+              <span className="status-dot" /> {systemStatusLabel}
             </div>
             <button className="icon-button" type="button" onClick={() => void refreshHealth()} aria-label="Refresh API status"><RefreshCw size={16} /></button>
             <div className="avatar">RF</div>
