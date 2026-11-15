@@ -214,7 +214,17 @@ PostgreSQL triggers reject UPDATE/DELETE against the original risk decision and
 review-event tables; they do not make the database tamper-proof against a
 database administrator.
 
-Run the API with the local environment file loaded when using these settings:
+To configure the local credential, fill the empty `RISKFORGE_REVIEWER_API_KEY=`
+line in the git-ignored root `.env` with a random key without printing it, and
+restrict the file to your user:
+
+```bash
+python -c "import pathlib,re,secrets; p=pathlib.Path('.env'); p.write_text(re.sub(r'(?m)^RISKFORGE_REVIEWER_API_KEY=.*$', 'RISKFORGE_REVIEWER_API_KEY=' + secrets.token_urlsafe(32), p.read_text()))"
+chmod 600 .env
+```
+
+The API does not load `.env` itself. Export it in the shell that starts the API,
+and restart the API after changing either reviewer variable:
 
 ```bash
 set -a
@@ -222,6 +232,11 @@ source .env
 set +a
 uvicorn app.main:app --reload
 ```
+
+To enter the key in the dashboard, read it locally from `.env`
+(`grep '^RISKFORGE_REVIEWER_API_KEY=' .env | cut -d= -f2-`). Never commit it or
+paste it into issues, logs or chat. Without both variables the review endpoints
+return 503; a missing or wrong key returns 401.
 
 
 TreeSHAP contributions are calculated on the raw XGBoost output margin (log-odds) and mapped back to the original 28 contract features. They are local model signals, not causal explanations, and are not calibrated-probability contributions. The policy explanation separately identifies the probability threshold band that produced the action.
