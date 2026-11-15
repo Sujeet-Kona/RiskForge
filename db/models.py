@@ -199,3 +199,30 @@ class RiskReviewEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+
+class RiskIdempotencyRecord(Base):
+    """One idempotency key, its request fingerprint, and the original response."""
+
+    __tablename__ = "risk_idempotency_records"
+    __table_args__ = (
+        CheckConstraint(
+            "length(request_hash) = 64",
+            name="request_hash_is_sha256",
+        ),
+        Index("ix_risk_idempotency_records_created_at", "created_at"),
+    )
+
+    idempotency_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("risk_decisions.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    response_body: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

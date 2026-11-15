@@ -24,6 +24,7 @@ from db.models import (
     RiskDecision,
     RiskReviewCase,
     RiskReviewEvent,
+    RiskIdempotencyRecord,
 )
 
 
@@ -85,6 +86,7 @@ def test_the_migration_creates_the_audit_and_review_tables(audit_database):
         AUDIT_TABLE_NAME,
         "risk_review_cases",
         "risk_review_events",
+        "risk_idempotency_records",
     }
 
 
@@ -93,6 +95,7 @@ def test_review_tables_have_exactly_the_modeled_columns(audit_database):
     for table, model in (
         ("risk_review_cases", RiskReviewCase),
         ("risk_review_events", RiskReviewEvent),
+        ("risk_idempotency_records", RiskIdempotencyRecord),
     ):
         columns = inspector.get_columns(table)
         assert {column["name"] for column in columns} == {
@@ -111,7 +114,8 @@ def test_postgres_enforces_append_only_decision_and_review_event_tables(audit_da
                     "WHERE NOT tgisinternal AND tgname IN "
                     "('trg_risk_decisions_append_only', "
                     "'trg_risk_review_events_append_only', "
-                    "'trg_risk_review_cases_one_way')"
+                    "'trg_risk_review_cases_one_way', "
+                    "'trg_risk_idempotency_records_append_only')"
                 )
             ).scalars()
         )
@@ -120,6 +124,7 @@ def test_postgres_enforces_append_only_decision_and_review_event_tables(audit_da
         "trg_risk_decisions_append_only",
         "trg_risk_review_events_append_only",
         "trg_risk_review_cases_one_way",
+        "trg_risk_idempotency_records_append_only",
     }
 
 
