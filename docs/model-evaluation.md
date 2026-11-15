@@ -70,6 +70,58 @@ The policy research uses synthetic false-positive, false-negative, and review as
 
 A forward-chaining validation search produced an experimental candidate with a 0.050 review threshold and 0.110 block threshold. It has not replaced `policy-001`; the active serving configuration remains unchanged.
 
+### Provenance of the frozen thresholds
+
+`policy-001` is immutable. This section records what the repository can and
+cannot establish about where its two thresholds came from, so that the gap is
+explicit rather than papered over.
+
+**Known and verifiable.**
+
+- The frozen values are 0.075 and 0.110, written in exactly one place:
+  `policy/locked.py:22-23`.
+- `policy/locked.py` was introduced already-locked in commit `34aceca`
+  ("Add FastAPI inference service"), the same commit that added the serving
+  layer, the artifact loader, and the parity script. There is no earlier commit
+  that derives, searches, or motivates 0.075.
+- The values are enforced at runtime: `app/service.py:196-235` refuses to start
+  against an artifact whose thresholds differ from `policy.locked`, and
+  `tests/test_serving_discipline.py:476-481` forbids the literals `0.075` and
+  `0.110` from appearing anywhere in `app/` or `db/`.
+- Boundary behaviour is exact and tested: ALLOW for `p < 0.075`, REVIEW for
+  `0.075 <= p < 0.110`, BLOCK for `p >= 0.110`.
+
+**Not established by this repository.**
+
+- The original rationale for choosing 0.075 as the REVIEW threshold is **not
+  recorded anywhere** — not in a commit message, a report, a script output, or
+  a document. It cannot be recovered from the code, and none is claimed here.
+- The 0.075 value is **not** the output of the cost-sensitive search described
+  below. That search selects 0.050.
+- No artifact links `scripts/select_decision_policy.py` to `policy/locked.py`.
+  The script does not import it, does not assert that its winner matches the
+  deployed thresholds, and **writes nothing to disk** — it is print-only, so
+  the search leaves no committed evidence.
+
+**The separate cost-search experiment.**
+
+`scripts/select_decision_policy.py` performs an exhaustive (not sampled) search
+over every feasible `(T_REVIEW, T_BLOCK)` pair with `T_REVIEW < T_BLOCK`, drawn
+from the empirical percentiles of forward-chaining out-of-fold VALIDATION
+scores plus a fixed interpretable grid. It uses the synthetic cost model in
+`policy/costs.py:88-93` — `C_FN=100`, `C_FP=10`, `C_REVIEW=5`, review fraud
+capture `e=0.70` — which that module states explicitly are project assumptions
+and not industry facts. TEST labels are read only after the search completes,
+and the script asserts the thresholds did not change (`:481-483`).
+
+Its selected candidate is `0.050 / 0.110`. The repository records only that
+this candidate "has not replaced `policy-001`". **No reason for that decision
+is recorded, and none is inferred here.**
+
+Adopting the search winner would change deployed behaviour, so it is treated as
+a separate future experiment requiring its own evidence, not as a correction to
+make silently.
+
 ## Reproduction
 
 With the IEEE-CIS files under `data/raw/ieee_cis/`, run:
@@ -86,6 +138,12 @@ calibrated TEST Brier score, ECE, ranking metrics, the forward-chaining OOF
 metrics, and the exact relative Brier/ECE reductions computed from the same
 run. Use this generated artifact to verify percentage-improvement claims; do
 not infer the raw ECE baseline from the calibrated-only summary table.
+
+**This file is generated on demand and is not committed.** A clean clone does
+not contain `reports/calibration/`; regenerating it requires the gitignored
+IEEE-CIS inputs and refits the model. The raw-versus-calibrated TEST table in
+[Calibration](#calibration) above is therefore the committed historical record
+of those five numbers, and it is what the serving artifact was built against.
 
 The benchmark writes:
 

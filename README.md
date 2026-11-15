@@ -153,7 +153,9 @@ The TEST Brier score decreased by approximately **76.1%**. Calibration improves 
 
 The benchmark reports descriptive TEST slices by chronological period, transaction-amount bands, ProductCD, and card-history groups. These are slices of the same holdout, not independent validation datasets. See the [segment report](reports/model_benchmark/test_segment_metrics.csv).
 
-An additional expanding-window evaluation, paired moving-time-block bootstrap, and segmented calibration reliability reports are documented in [temporal evaluation](docs/temporal_evaluation.md). They require the IEEE-CIS source data. No additional robustness metrics are claimed until those runs complete.
+An additional expanding-window evaluation, paired moving-time-block bootstrap, and segmented calibration reliability reports are documented in [temporal evaluation](docs/temporal_evaluation.md) and committed under [reports/temporal_robustness/](reports/temporal_robustness/). Across four expanding folds XGBoost averaged **0.4940** Average Precision (std 0.0524, range 0.4244–0.5449) and **0.8884** ROC-AUC, against Random Forest at 0.4629 and 0.8834.
+
+These walk-forward figures are **not comparable to the locked TEST benchmark above** and must not be quoted alongside it. The expanding window overtakes the locked split boundaries: fold 3 trains on 58,741 rows of the locked VALIDATION period, and fold 4's training window includes 29,419 rows — 33.4% — of the locked 88,081-row TEST partition. They are repeated historical simulations on one finite dataset, not independent out-of-sample estimates. Regenerating them requires the gitignored IEEE-CIS source data; the committed CSVs are historical artifacts whose configuration and internal arithmetic have been checked against the generating code, but whose exact floats have not been re-derived here.
 
 ## Decision policy
 
@@ -166,6 +168,8 @@ The serving path applies the frozen policy-001 thresholds to calibrated probabil
 | BLOCK | p ≥ 0.110 |
 
 Policy research used synthetic assumptions: missed-fraud cost 100 units, false-decline cost 10 units, manual-review cost 5 units, and 70% assumed fraud capture by review. These are experimental inputs, not measured payment-network economics. The policy is amount-blind and should not be interpreted as a validated real-world payment policy.
+
+The original rationale for the 0.075 REVIEW threshold is **not recorded in this repository**, and the cost-sensitive search described above selects 0.050, not 0.075. That gap is documented explicitly rather than retrofitted with a justification — see [policy provenance](docs/model-evaluation.md#provenance-of-the-frozen-thresholds). `policy-001` is treated as immutable absent a separate, evidence-backed experiment.
 
 ## Inference API
 

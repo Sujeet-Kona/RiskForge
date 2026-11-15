@@ -155,3 +155,42 @@ is not a fresh model-training or benchmark reproduction.
 - Runtime and source fingerprints are emitted by new benchmark runs; they are
   not retroactively available in the currently committed metadata.
 - The offline/API parity evidence covers three selected validation cases only.
+
+## What a clean clone contains
+
+`.gitignore` excludes the dataset, generated features, the fitted serving
+bundle, and MLflow state. This is deliberate — none of them should be
+redistributed — but it means a fresh checkout is **not** immediately runnable
+as a serving system.
+
+| Path | In a clean clone | Needed to |
+| --- | --- | --- |
+| `app/`, `db/`, `ml/`, `policy/`, `explain/`, `tracking/`, `scripts/`, `alembic/`, `tests/`, `frontend/src/` | **yes** | read and test the code |
+| `docs/`, `README.md`, `.env.example`, `.github/workflows/ci.yml` | **yes** | understand and CI-verify the project |
+| `reports/model_benchmark/` (4 files) | **yes** | check the locked benchmark numbers |
+| `reports/temporal_robustness/` (5 files) | **yes** | check the walk-forward and bootstrap numbers |
+| `reports/calibration/evaluation_metrics.json` | **no** — generated on demand | verify relative Brier/ECE reductions |
+| `data/raw/ieee_cis/*.csv` | **no** — gitignored, obtain from Kaggle | run any training or evaluation script |
+| `data/processed/train_behavioral_v1.parquet` | **no** — gitignored | skip stage 1 of the workflow |
+| `artifacts/serving/riskforge_serving_artifact.joblib` | **no** — gitignored | serve predictions or run the parity check |
+| `mlruns/`, `mlflow.db` | **no** — gitignored | reproduce experiment tracking |
+| `.env` | **no** — gitignored | supply local database and reviewer-key settings |
+
+Two consequences worth stating plainly:
+
+- **The test suite does not need the dataset or the artifact.** The fixtures
+  build a synthetic 600-row modeling frame through the real
+  `build_modeling_frame` and the real preprocessor (`tests/conftest.py:46-56`),
+  so all 1,246 tests — including the serving-discipline, explainability,
+  parity, migration, and concurrency suites — run and pass on a clean clone with
+  only a PostgreSQL server available. This is why CI is green without IEEE-CIS.
+- **Serving does need them.** `app/dependencies.py:80-109` fails closed when
+  the artifact is missing or invalid; there is no fallback model. To run the
+  API locally you must obtain the dataset and execute stages 1 through 5 of the
+  workflow above, which regenerates the behavioral Parquet file and the frozen
+  serving bundle.
+
+The committed `reports/` CSVs are historical generated artifacts. They can be
+checked for internal consistency and against the code that produced them
+without the dataset, but re-deriving their exact floats requires the IEEE-CIS
+inputs and the pinned environment.
