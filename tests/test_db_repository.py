@@ -628,6 +628,86 @@ def test_concurrent_different_payloads_for_one_key_have_one_winner(
 
 
 
+# --- concurrent review transitions -------------------------------------------
+
+
+def test_concurrent_reviewers_produce_one_resolution_and_one_event(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+    audit_database: AuditDatabase,
+):
+    """Two reviewers clicking at once cannot both resolve the same case.
+
+    Distinct from ``test_a_review_case_cannot_be_resolved_twice``, which
+    resolves sequentially and so never makes two transactions contend for the
+    row lock. Here the ``SELECT ... FOR UPDATE`` in ``resolve_review_case`` is
+    the only thing standing between one committed outcome and two, so the test
+    asserts the loser's fate as well as the winner's: exactly one resolution,
+    exactly one append-only review event, and the stored outcome attributable to
+    the one reviewer who won.
+    """
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+
+    worker_count = 6
+    start = Barrier(worker_count)
+
+    def submit(index: int):
+        reviewer_id = f"reviewer-{index:02d}"
+        outcome = "APPROVED" if index % 2 == 0 else "REJECTED"
+        start.wait(timeout=10)
+        try:
+            resolved = audit_repository.resolve_review_case(
+                case_id=case_id,
+                outcome=outcome,
+                reviewer_id=reviewer_id,
+                comment=None,
+            )
+        except ReviewConflictError:
+            return ("conflict", None)
+        return ("resolved", (reviewer_id, outcome, resolved))
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        outcomes = list(executor.map(submit, range(worker_count)))
+
+    winners = [payload for kind, payload in outcomes if kind == "resolved"]
+    assert len(winners) == 1
+    assert outcomes.count(("conflict", None)) == worker_count - 1
+
+    reviewer_id, outcome, resolved = winners[0]
+    assert resolved.status == outcome
+    assert resolved.resolved_by == reviewer_id
+
+    with audit_database.engine.connect() as connection:
+        stored = connection.execute(
+            text(
+                "SELECT status, resolved_by FROM risk_review_cases "
+                "WHERE id = :case_id"
+            ),
+            {"case_id": case_id},
+        ).one()
+        event_count = connection.execute(
+            text(
+                "SELECT COUNT(*) FROM risk_review_events "
+                "WHERE review_case_id = :case_id"
+            ),
+            {"case_id": case_id},
+        ).scalar_one()
+        pending_count = connection.execute(
+            text("SELECT COUNT(*) FROM risk_review_cases WHERE status = 'PENDING'")
+        ).scalar_one()
+
+    assert (stored.status, stored.resolved_by) == (outcome, reviewer_id)
+    assert event_count == 1
+    assert pending_count == 0
+
+
+
 def test_review_case_identity_cannot_be_changed_during_resolution(
     audit_repository: AuditRepository,
     audit_record: AuditRecord,
