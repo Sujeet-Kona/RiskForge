@@ -102,3 +102,82 @@ body{background:linear-gradient(135deg,#f7f9fe 0%,#edf3fb 55%,#f8faff 100%);colo
   .environment-card{background:#ffffff0c;border-color:#ffffff20}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* Readability and accessibility pass.
+
+   Appended last so it wins the cascade over both themes above without editing
+   the minified rules. Three things are corrected:
+
+   1. Type sizes. The densest labels shipped at 7px and 8px, which is below the
+      point where letter-spacing can compensate. Everything is lifted onto a
+      three-step scale: 11px for uppercase micro-labels, 12px for secondary
+      copy, 16px for form controls.
+   2. Contrast. --muted was #6d7d96, which measures 4.18:1 on the white panels
+      and fails WCAG AA for text. It is now #5c6c85: 5.33:1 on white and 4.86:1
+      on the lightest point of the page gradient. The light theme hardcoded
+      near-identical values (#71819a, #7b8ca3, #788aa2 and friends, all in the
+      3.0-4.0:1 range) per selector; those now reference the token.
+   3. Form controls at 16px, which is the threshold below which iOS Safari
+      auto-zooms the page on focus. */
+:root{--muted:#5c6c85;--focus-ring:#2563eb}
+
+/* 11px — uppercase micro-labels and metadata that was 7px or 8px. */
+.brand small,.soon,.sidebar-foot,.metric-top,.section-kicker,.workspace-label,.eyebrow,
+.form-section-title,.field em,.decision-banner span,.probability-head,.thresholds,
+.signals-heading span,.signal-row small,.result-foot,.footer,.history-table th,
+.history-table td small,.history-decision,.review-case-id,.review-card-top p,
+.review-details small,.review-signals span,.result-meta span,.review-risk small,
+.review-details span{font-size:11px}
+.history-time{font-size:11px!important}
+
+/* Tracking was tuned for 8px type and looks loose at 11px. */
+.brand small{letter-spacing:1.2px}
+.workspace-label,.section-kicker,.eyebrow{letter-spacing:1.1px}
+.metric-top,.form-section-title,.policy-explanation span{letter-spacing:.8px}
+
+/* 12px — secondary copy that was 9px or 10px. */
+.environment-card small,.environment-card strong,.metric-caption,.metric-value small,
+.field,.form-hint,.disabled-note,.empty-checks span,.empty-result p,.decision-banner small,
+.signal-row strong,.signal-value,.muted-copy,.notice,.page-heading p,.panel-heading p,
+.system-status,.date-chip,.avatar,.result-meta strong,.history-empty,.history-table td,
+.history-table td strong,.secondary-button,.approve-button,.reject-button,
+.review-explanation,.review-details strong,.primary-button,
+.policy-explanation span,.policy-explanation p{font-size:12px}
+
+/* 16px — form controls, to keep iOS Safari from zooming on focus. */
+.field input,.field select,.field textarea{font-size:16px}
+.field textarea{line-height:1.55}
+.input-prefix b{top:11px;font-size:16px}
+
+/* Contrast: every failing foreground in the light theme now uses --muted. */
+.breadcrumb,.slash,.page-heading p,.panel-heading p,.metric-top,.metric-value small,
+.metric-caption,.field em,.form-hint,.disabled-note,.select-chevron,.input-prefix b,
+.empty-result p,.thresholds,.result-meta span,.signals-heading span,.signal-row small,
+.result-foot,.muted-copy,.footer,.footer b,.history-empty,
+.history-table th,.history-table td small,.review-case-id,.review-card-top p,
+.review-risk small,.review-details span,.review-details small{color:var(--muted)}
+.history-time{color:var(--muted)!important}
+.field input::placeholder,.field textarea::placeholder{color:#64758f}
+/* Keeps its green meaning; the previous #0d9274 measured 3.90:1 on white. */
+.signal-value.down{color:#0a7a61}
+
+/* Visible, consistent focus for keyboard users. Inputs already had a ring;
+   buttons and links relied on the browser default. */
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+
+/* Screen-reader-only text. Used for the decision announcement, which must stay
+   in the DOM between renders or assistive technology will not pick it up. */
+.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+.result-panel{position:relative}
+
+.skip-link{position:absolute;left:12px;top:-60px;z-index:20;padding:10px 14px;border-radius:8px;background:#fff;color:#1b3150;font-size:12px;font-weight:700;text-decoration:none;box-shadow:0 6px 20px #18345b26;transition:top .15s}
+.skip-link:focus-visible{top:12px}
+
+/* The status chip carried real information, so it survives small screens and
+   the redundant breadcrumb goes instead. */
+@media(max-width:520px){.breadcrumb{display:none}.system-status{font-size:11px}.topbar{gap:10px}}
+
+/* The 11px lift above would otherwise undo the icon rail's font-size:0 hiding,
+   because this block is later in the cascade. display:none cannot be undone by
+   a font-size rule. */
+@media(max-width:800px){.brand>span:last-child,.workspace-label{display:none}}

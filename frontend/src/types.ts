@@ -81,6 +81,11 @@ export interface AuditDecisionListResponse {
   offset: number;
 }
 
+export interface ArtifactSummary {
+  n_features?: number | null;
+  [key: string]: unknown;
+}
+
 export interface HealthResponse {
   status: "ok" | "unavailable";
   model_version?: string | null;
@@ -88,7 +93,7 @@ export interface HealthResponse {
   calibration_method?: string | null;
   policy_version?: string | null;
   database?: "ready" | "unavailable" | null;
-  artifact?: Record<string, unknown> | null;
+  artifact?: ArtifactSummary | null;
 }
 
 export interface ApiError {

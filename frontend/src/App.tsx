@@ -140,6 +140,15 @@ function App() {
   const probability = result ? result.risk_probability * 100 : null;
   const decision = result ? decisionMeta[result.decision] : null;
   const ResultIcon = decision?.icon;
+  const artifactFeatures = health?.artifact?.n_features;
+  const featureContractLabel = typeof artifactFeatures === "number"
+    ? String(artifactFeatures)
+    : "—";
+  const resultAnnouncement = loading
+    ? "Scoring transaction."
+    : result
+      ? `Decision ${decision?.label}. Calibrated fraud probability ${probability?.toFixed(2)} percent. ${result.decision_explanation}`
+      : "";
 
   const historyCount = useMemo(() => {
     try {
@@ -210,6 +219,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#overview">Skip to main content</a>
       <aside className="sidebar">
         <a className="brand" href="#overview" aria-label="RiskForge home">
           <span className="brand-mark"><Shield size={19} strokeWidth={2.4} /></span>
@@ -231,7 +241,7 @@ function App() {
         </div>
       </aside>
 
-      <main className="main-content" id="overview">
+      <main className="main-content" id="overview" tabIndex={-1}>
         <header className="topbar">
           <div className="breadcrumb"><span>Workspace</span><span className="slash">/</span><strong>Overview</strong></div>
           <div className="topbar-actions">
@@ -260,7 +270,7 @@ function App() {
           </article>
           <article className="metric-card">
             <div className="metric-top"><span>FEATURE CONTRACT</span><span className="metric-icon blue"><SlidersHorizontal size={17} /></span></div>
-            <div className="metric-value">{health?.status === "ok" ? "28" : "—"}<small> features</small></div>
+            <div className="metric-value">{featureContractLabel}<small> features</small></div>
             <div className="metric-caption">{health?.feature_version ?? "Version unavailable"}</div>
           </article>
           <article className="metric-card">
@@ -280,15 +290,15 @@ function App() {
           </article>
         </section>
 
-        {healthError && <div className="notice warning"><AlertCircle size={17} /><span>{healthError} — start the API and confirm the serving artifact and database are available.</span></div>}
+        {healthError && <div className="notice warning" role="alert"><AlertCircle size={17} aria-hidden="true" /><span>{healthError} — start the API and confirm the serving artifact and database are available.</span></div>}
 
         <div className="content-grid">
           <section className="panel scoring-panel" id="score">
             <div className="panel-heading">
-              <div><div className="section-kicker">INFERENCE</div><h2>Score a transaction</h2><p>Submit a transaction and strictly-prior history to the frozen model.</p></div>
-              <span className="panel-symbol"><Command size={18} /></span>
+              <div><div className="section-kicker">INFERENCE</div><h2 id="scoring-heading">Score a transaction</h2><p>Submit a transaction and strictly-prior history to the frozen model.</p></div>
+              <span className="panel-symbol"><Command size={18} aria-hidden="true" /></span>
             </div>
-            <form onSubmit={submitScore}>
+            <form onSubmit={submitScore} aria-labelledby="scoring-heading">
               <div className="form-section-title">TRANSACTION DETAILS</div>
               <div className="field-grid">
                 <label className="field full"><span>Transaction ID</span><input required maxLength={64} value={form.transactionId} onChange={(e) => update("transactionId", e.target.value)} /></label>
@@ -305,20 +315,20 @@ function App() {
 
               <div className="form-section-title history-title">BEHAVIORAL CONTEXT <span>{historyCount} records</span></div>
               <label className="field full"><span>Prior transaction history <em>JSON array · strictly earlier timestamps only</em></span><textarea rows={4} spellCheck={false} value={historyText} onChange={(e) => { setHistoryText(e.target.value); setIdempotencyKey(crypto.randomUUID()); }} /></label>
-              <div className="form-hint"><CircleHelp size={14} /> History rows require TransactionDT and TransactionAmt. Include card1 / addr1 / addr2 to match the current entity.</div>
+              <div className="form-hint"><CircleHelp size={14} aria-hidden="true" /> History rows require TransactionDT and TransactionAmt. Include card1 / addr1 / addr2 to match the current entity.</div>
 
-              {error && <div className="notice error"><AlertCircle size={17} /><span>{error}</span></div>}
+              {error && <div className="notice error" role="alert"><AlertCircle size={17} aria-hidden="true" /><span>{error}</span></div>}
               <button className="primary-button" type="submit" disabled={loading || !apiReady}>
-                {loading ? <><span className="spinner" /> Scoring transaction…</> : <><Activity size={16} /> Run risk assessment</>}
+                {loading ? <><span className="spinner" aria-hidden="true" /> Scoring transaction…</> : <><Activity size={16} aria-hidden="true" /> Run risk assessment</>}
               </button>
               {!apiReady && <p className="disabled-note">Scoring is disabled until the API, model artifact and audit database are ready.</p>}
             </form>
           </section>
 
-          <section className="panel result-panel">
+          <section className="panel result-panel" aria-labelledby="result-heading">
             <div className="panel-heading">
-              <div><div className="section-kicker">ASSESSMENT OUTPUT</div><h2>Decision result</h2><p>Model risk signals and policy outcome.</p></div>
-              <span className="panel-symbol"><ShieldCheck size={18} /></span>
+              <div><div className="section-kicker">ASSESSMENT OUTPUT</div><h2 id="result-heading">Decision result</h2><p>Model risk signals and policy outcome.</p></div>
+              <span className="panel-symbol"><ShieldCheck size={18} aria-hidden="true" /></span>
             </div>
             {!result ? (
               <div className="empty-result">
@@ -346,21 +356,22 @@ function App() {
                 <div className="result-foot">Transaction {result.transaction_id} · {result.feature_count} features · {result.feature_version}</div>
               </div>
             )}
+            <p className="visually-hidden" role="status">{resultAnnouncement}</p>
           </section>
         </div>
 
-        <section className="panel history-panel" id="activity">
+        <section className="panel history-panel" id="activity" aria-labelledby="history-heading">
           <div className="panel-heading history-heading">
-            <div><div className="section-kicker">AUDIT TRAIL</div><h2>Recent decisions</h2><p>Persisted scoring outcomes returned by the PostgreSQL audit store.</p></div>
-            <button className="icon-button" type="button" onClick={() => void refreshHistory()} aria-label="Refresh decision history" disabled={historyLoading}><RefreshCw size={15} /></button>
+            <div><div className="section-kicker">AUDIT TRAIL</div><h2 id="history-heading">Recent decisions</h2><p>Persisted scoring outcomes returned by the PostgreSQL audit store.</p></div>
+            <button className="icon-button" type="button" onClick={() => void refreshHistory()} aria-label="Refresh decision history" aria-busy={historyLoading} disabled={historyLoading}><RefreshCw size={15} aria-hidden="true" /></button>
           </div>
-          {historyError && <div className="notice warning"><AlertCircle size={16} /><span>{historyError}</span></div>}
+          {historyError && <div className="notice warning" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{historyError}</span></div>}
           {historyRows.length === 0 ? (
-            <div className="history-empty">{historyLoading ? "Loading recorded decisions…" : "No persisted decisions yet. Score a transaction to create the first audit record."}</div>
+            <div className="history-empty" role="status">{historyLoading ? "Loading recorded decisions…" : "No persisted decisions yet. Score a transaction to create the first audit record."}</div>
           ) : (
             <div className="history-table-wrap">
               <table className="history-table">
-                <thead><tr><th>TRANSACTION</th><th>OUTCOME</th><th>RISK</th><th>MODEL / POLICY</th><th>RECORDED</th></tr></thead>
+                <thead><tr><th scope="col">TRANSACTION</th><th scope="col">OUTCOME</th><th scope="col">RISK</th><th scope="col">MODEL / POLICY</th><th scope="col">RECORDED</th></tr></thead>
                 <tbody>
                   {historyRows.map((item) => (
                     <tr key={item.id ?? item.transaction_id}>
@@ -377,26 +388,26 @@ function App() {
           )}
         </section>
 
-        <section className="panel review-panel" id="review">
+        <section className="panel review-panel" id="review" aria-labelledby="review-heading">
           <div className="panel-heading">
-            <div><div className="section-kicker">HUMAN-IN-THE-LOOP</div><h2>Manual review queue</h2><p>Inspect REVIEW decisions and record a separate human outcome.</p></div>
-            <span className="panel-symbol"><ShieldAlert size={18} /></span>
+            <div><div className="section-kicker">HUMAN-IN-THE-LOOP</div><h2 id="review-heading">Manual review queue</h2><p>Inspect REVIEW decisions and record a separate human outcome.</p></div>
+            <span className="panel-symbol"><ShieldAlert size={18} aria-hidden="true" /></span>
           </div>
           <div className="review-access">
             <label className="field"><span>Reviewer API key <em>held in memory only</em></span><input type="password" autoComplete="off" placeholder="Enter the server-configured reviewer key" value={reviewerKey} onChange={(e) => setReviewerKey(e.target.value)} /></label>
-            <button className="secondary-button" type="button" onClick={() => void loadReviewQueue()} disabled={reviewLoading || !reviewerKey.trim()}>{reviewLoading ? "Loading…" : "Load pending cases"}</button>
+            <button className="secondary-button" type="button" onClick={() => void loadReviewQueue()} aria-busy={reviewLoading} disabled={reviewLoading || !reviewerKey.trim()}>{reviewLoading ? "Loading…" : "Load pending cases"}</button>
           </div>
-          <p className="form-hint"><CircleHelp size={14} /> The key is sent only in the request header and is not saved in browser storage. Configure a local reviewer key on the API before using this workflow.</p>
-          {reviewError && <div className="notice error"><AlertCircle size={16} /><span>{reviewError}</span></div>}
-          {reviewNotice && <div className="notice success"><CheckCircle2 size={16} /><span>{reviewNotice}</span></div>}
+          <p className="form-hint"><CircleHelp size={14} aria-hidden="true" /> The key is sent only in the request header and is not saved in browser storage. Configure a local reviewer key on the API before using this workflow.</p>
+          {reviewError && <div className="notice error" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{reviewError}</span></div>}
+          {reviewNotice && <div className="notice success" role="status"><CheckCircle2 size={16} aria-hidden="true" /><span>{reviewNotice}</span></div>}
           {reviewCases.length === 0 ? (
-            <div className="history-empty">{reviewLoading ? "Loading review cases…" : "No pending cases loaded. Authenticate to retrieve the review queue."}</div>
+            <div className="history-empty" role="status">{reviewLoading ? "Loading review cases…" : "No pending cases loaded. Authenticate to retrieve the review queue."}</div>
           ) : (
             <div className="review-list">
               {reviewCases.map((item) => (
-                <article className="review-card" key={item.case_id}>
+                <article className="review-card" key={item.case_id} aria-labelledby={`review-case-${item.case_id}`}>
                   <div className="review-card-top">
-                    <div><span className="review-case-id">CASE #{item.case_id} · DECISION #{item.decision_id}</span><h3>{item.transaction_id}</h3><p>Automated outcome <span className="history-decision review">REVIEW</span></p></div>
+                    <div><span className="review-case-id">CASE #{item.case_id} · DECISION #{item.decision_id}</span><h3 id={`review-case-${item.case_id}`}>{item.transaction_id}</h3><p>Automated outcome <span className="history-decision review">REVIEW</span></p></div>
                     <div className="review-risk"><strong>{(item.risk_probability * 100).toFixed(2)}%</strong><small>CALIBRATED RISK</small></div>
                   </div>
                   <div className="review-details">
@@ -409,8 +420,8 @@ function App() {
                   </div>
                   <label className="field review-comment"><span>Reviewer notes <em>optional</em></span><textarea rows={2} value={reviewComments[item.case_id] ?? ""} onChange={(e) => setReviewComments((current) => ({ ...current, [item.case_id]: e.target.value }))} placeholder="Record the evidence or rationale for this outcome…" /></label>
                   <div className="review-actions">
-                    <button className="approve-button" type="button" disabled={reviewActionId !== null} onClick={() => void resolveCase(item.case_id, "APPROVED")}><CheckCircle2 size={15} /> Clear transaction</button>
-                    <button className="reject-button" type="button" disabled={reviewActionId !== null} onClick={() => void resolveCase(item.case_id, "REJECTED")}><Shield size={15} /> Confirm suspected fraud</button>
+                    <button className="approve-button" type="button" disabled={reviewActionId !== null} aria-busy={reviewActionId === item.case_id} onClick={() => void resolveCase(item.case_id, "APPROVED")}><CheckCircle2 size={15} aria-hidden="true" /> Clear transaction</button>
+                    <button className="reject-button" type="button" disabled={reviewActionId !== null} aria-busy={reviewActionId === item.case_id} onClick={() => void resolveCase(item.case_id, "REJECTED")}><Shield size={15} aria-hidden="true" /> Confirm suspected fraud</button>
                   </div>
                 </article>
               ))}
