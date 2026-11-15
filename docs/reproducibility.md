@@ -219,15 +219,16 @@ authentic.
 ## CI scope
 
 GitHub Actions runs Ruff, Python compilation, Alembic migration/schema checks,
-and pytest against PostgreSQL 17. It also typechecks and builds the frontend,
-but **does not run Vitest yet**. See [frontend checks](../frontend/README.md#frontend-checks)
-for local commands; changing the shared CI pipeline requires separate permission.
+and pytest against PostgreSQL 17. The frontend job runs `npm ci` from the
+committed lockfile, the Vitest suite (`npm test`), and `npm run build`, which
+type-checks before the production build. See [frontend checks](../frontend/README.md#frontend-checks)
+for local commands.
 
 CI does **not** download IEEE-CIS, train a model, build the serving artifact,
 run the real-data parity script, connect to MLflow, or deploy the API. Those
 steps require the separately obtained dataset and/or generated local artifacts.
-A green CI run is not a fresh model-training or benchmark reproduction, nor
-evidence that frontend tests ran.
+A green CI run is not a fresh model-training or benchmark reproduction, nor a
+browser end-to-end test; the frontend tests mock API calls.
 
 ## Reproducibility boundaries
 

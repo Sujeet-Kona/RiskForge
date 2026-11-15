@@ -3,10 +3,12 @@
 ## Executive status
 
 **VERIFIED:** the current local backend, database, serving-parity and frontend
-checks listed below. **USER ACTION REQUIRED:** user acceptance and separately
-authorized remote integration. This is not a declaration that the whole PR stack
-has shipped or that the prototype is production-ready. Nothing was pushed during
-the final local-completion phase.
+checks listed below, and dashboard acceptance of one APPROVE and one REJECT
+manual-review case (see [manual-review dashboard acceptance](#manual-review-dashboard-acceptance-2026-11-16)).
+**USER ACTION REQUIRED:** human review and dependency-ordered integration of the
+PR stack. This is not a declaration that the whole PR stack has shipped or that
+the prototype is production-ready. The completion branch was later pushed and
+opened as draft PR #14; nothing has been merged.
 
 Work was isolated on `hardening/riskforge-completion`, based on the existing PR
 stack, with PR #11's required fix merged into the stack tip. Final checks covered
@@ -154,6 +156,39 @@ post-reload score returned ALLOW at displayed 1.37%, rendered both amount
 features sharing the same reason category, and produced **no console warnings
 or errors** and no UI alerts.
 
+### Manual-review dashboard acceptance (2026-11-16)
+
+Both cases used the actual Vite dashboard on `127.0.0.1:5173`, proxied to FastAPI
+on `127.0.0.1:8001`, with only the disposable `riskforge_test` database. Each case
+came from a real VALIDATION transaction scored through `POST /v1/risk/score` with
+its strictly prior 24-hour history; case #2's identical idempotent retry replayed
+the stored response. The fraud label was not used to select or score either case.
+A temporary reviewer key existed only in the API process environment. Afterwards
+the API was restarted from the ignored local `.env` and the temporary key returned
+HTTP 401.
+
+| Case | Transaction | History rows | Model decision | Dashboard action | Recorded review |
+| --- | --- | ---: | --- | --- | --- |
+| #2 | 3401505 | 29 | REVIEW, `0.090909` | **Clear transaction** (APPROVE), via browser automation | APPROVED by `reviewer-local`; note “Local acceptance check only; not an adjudicated fraud label.” |
+| #3 | 3402682 | 321 | REVIEW, `0.090909` | **Confirm suspected fraud** (REJECT), clicked by the user | REJECTED by `reviewer-local`; **no reviewer note recorded** |
+
+- For each case the dashboard reported the recorded outcome, stated that the
+  original model decision remains REVIEW, and showed **“No pending review
+  cases.”** Each resolve request returned HTTP 200.
+- Read-only SQL confirmed both original decisions remain REVIEW, each transaction
+  has exactly one decision and one idempotency record, and each case has exactly
+  one review event.
+- A second resolution of case #2 through the dashboard proxy returned HTTP 409
+  `conflict`; the dashboard offers no action on resolved cases. A second
+  resolution of case #3 was not attempted.
+- Case #3 was the REVIEW transaction closest to the centre of the REVIEW band
+  after excluding previously used IDs. The rebuilt VALIDATION frame matched the
+  locked band counts.
+- Not verified: the `.env` reviewer key in the dashboard. Reviewer access is a
+  single local demonstration key, not production reviewer authentication. These
+  disposable records can be removed by test-suite resets. Review outcomes recorded
+  here are acceptance actions, not adjudicated fraud labels.
+
 ## ML integrity and evidence boundaries
 
 **VERIFIED locally:** shared feature contract, strict-prior boundaries, artifact
@@ -207,12 +242,14 @@ with `git merge-base --is-ancestor`. No remote completion branch was present.
 The original checkout remains on its original local branch/commit with its user
 changes intact. A previously authorized push attempt was rejected with HTTP 403
 for account `sandy-455`; no fork/remote/authentication setting was changed. The
-latest instruction is **do not push**, which remains in effect.
+completion branch was later pushed to `origin/hardening/riskforge-completion` and
+opened as draft PR #14 against #13's branch.
 
 Existing remote `main` at `37883498801fb998f1d35d6c8ec7d2e20b6cf271` has a successful
-historical CI run from 2026-11-07. That is **not CI for this local work**. Existing
-CI runs backend checks and frontend typecheck/build, not Vitest. Changing the
-shared pipeline requires separate authorization.
+historical CI run from 2026-11-07. That is **not CI for this local work**. CI now
+also installs the frontend with `npm ci` and runs Vitest before the type-check and
+production build. Run `43753200454` on PR #14 head `a33d55e` passed with 1,256
+pytest tests and 60 Vitest tests.
 
 Safe future sequence, only when authorized: recheck heads/bases/checks; integrate
 #10 → #11 → #12 → #13 in dependency order, verifying the next base and checks
@@ -238,11 +275,10 @@ cover local usage and database safety.
 - [x] Frontend tests, typecheck, production build and clean lockfile installation inspected.
 - [x] Browser scoring/review workflow and disposable DB persistence inspected.
 - [x] Historical metrics distinguished from fresh engineering checks.
-- [ ] **USER ACTION REQUIRED:** personally accept the local browser workflow.
-- [ ] **USER ACTION REQUIRED:** personally accept the local database/end-to-end behavior.
-- [ ] **USER ACTION REQUIRED:** authorize any remote work and resolve write access.
-- [ ] **USER ACTION REQUIRED:** integrate the PR stack and completion work, then verify CI on the integrated main tree.
-- [ ] **NOT IMPLEMENTED:** committed unattended browser-E2E suite and frontend-test CI step.
+- [x] Manual-review dashboard acceptance: case #2 APPROVE and case #3 REJECT; both original decisions remain REVIEW.
+- [x] Completion branch pushed and opened as draft PR #14; CI includes frontend Vitest.
+- [ ] **USER ACTION REQUIRED:** human review of the PR stack, then integrate it in dependency order and verify CI on the integrated main tree.
+- [ ] **NOT IMPLEMENTED:** committed unattended browser-E2E suite.
 
 The API/PostgreSQL integration tests, component tests and browser walkthrough are
 different evidence layers. Do not describe the mocked component suite as a full

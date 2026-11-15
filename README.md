@@ -278,7 +278,7 @@ This is a targeted three-case parity check, not exhaustive proof for all possibl
 
 **Before running pytest:** `tests/conftest.py` always derives `riskforge_test` on the configured database server, regardless of the database name in `DATABASE_URL`. It may create, downgrade, rebuild, and truncate that database. Use a disposable **LOCAL** server only, verify the target first, and set `RISKFORGE_REQUIRE_POSTGRES=1` to prevent silent database-test skips. Follow the [database safety and check instructions](docs/reproducibility.md#local-api-and-database-checks).
 
-CI runs Ruff, Python compilation, Alembic migration/schema checks, and pytest with PostgreSQL 17. It also typechecks and builds the frontend, but **does not run Vitest yet**; a shared-pipeline change requires separate permission. CI does not download IEEE-CIS, train models, build the serving artifact, run the real-data parity script, connect to an MLflow server, or deploy the API.
+CI runs Ruff, Python compilation, Alembic migration/schema checks, and pytest with PostgreSQL 17. The frontend job installs dependencies from the committed lockfile with `npm ci`, runs the Vitest suite with `npm test`, then type-checks and creates the production build with `npm run build`. The frontend tests mock API calls; CI does not run a browser end-to-end suite. CI does not download IEEE-CIS, train models, build the serving artifact, run the real-data parity script, connect to an MLflow server, or deploy the API.
 
 ## Technology
 

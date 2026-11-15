@@ -57,8 +57,9 @@ npm run build
 ```
 
 `npm test` runs Vitest once; `npm run test:watch` is available for local work.
-Current CI typechecks and builds the frontend but **does not run Vitest yet**.
-Adding Vitest to the shared pipeline requires separate permission.
+CI runs `npm ci`, `npm test` (Vitest) and `npm run build`, which type-checks
+with `tsc --noEmit` before the Vite production build. These tests mock API calls;
+they are not a browser end-to-end suite.
 
 ## Current scope
 
