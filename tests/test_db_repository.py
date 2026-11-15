@@ -667,8 +667,6 @@ def test_review_case_rejects_inconsistent_resolution_timestamps(
 
     with pytest.raises(DBAPIError):
         with audit_repository.database.session_factory() as session:
-            from db.models import RiskReviewCase
-
             case = session.get(RiskReviewCase, case_id)
             invalid_time = case.created_at - timedelta(seconds=1)
             case.status = "APPROVED"
@@ -700,4 +698,24 @@ def test_review_case_rejects_blank_reviewer_identity_at_database_boundary(
             case.updated_at = resolved_at
             case.resolved_at = resolved_at
             case.resolved_by = "   "
+            session.commit()
+
+
+
+def test_pending_review_case_cannot_be_deleted(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+):
+    audit_repository.create_audit_record(audit_record)
+    cases, _ = audit_repository.list_review_cases(
+        status="PENDING",
+        limit=10,
+        offset=0,
+    )
+    case_id = cases[0].id
+
+    with pytest.raises(DBAPIError):
+        with audit_repository.database.session_factory() as session:
+            case = session.get(RiskReviewCase, case_id)
+            session.delete(case)
             session.commit()
