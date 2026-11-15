@@ -49,9 +49,31 @@ def upgrade() -> None:
         $rf$ LANGUAGE plpgsql;
         """
     )
+    op.execute(
+        """
+        CREATE FUNCTION riskforge_reject_review_case_delete()
+        RETURNS trigger AS $rf$
+        BEGIN
+            RAISE EXCEPTION 'RiskForge review cases cannot be deleted';
+            RETURN OLD;
+        END;
+        $rf$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_risk_review_cases_no_delete
+        BEFORE DELETE ON risk_review_cases
+        FOR EACH ROW EXECUTE FUNCTION riskforge_reject_review_case_delete();
+        """
+    )
 
 
 def downgrade() -> None:
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_risk_review_cases_no_delete ON risk_review_cases"
+    )
+    op.execute("DROP FUNCTION IF EXISTS riskforge_reject_review_case_delete()")
     op.execute(
         """
         CREATE OR REPLACE FUNCTION riskforge_guard_review_case_transition()
