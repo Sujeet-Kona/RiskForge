@@ -20,6 +20,7 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from typing import Any, Protocol
 
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from db.models import DECISION_VALUES, RiskDecision
@@ -134,6 +135,10 @@ class AuditStore(Protocol):
 
     def get_audit_record(self, decision_id: int) -> AuditRecord | None: ...
 
+    def list_audit_records(
+        self, *, limit: int, offset: int, decision: str | None = None
+    ) -> tuple[list[AuditRecord], int]: ...
+
     def is_ready(self) -> bool: ...
 
 
@@ -175,6 +180,45 @@ class AuditRepository:
             logger.error("could not read audit record %s", decision_id, exc_info=error)
             raise AuditPersistenceError(
                 "The audit record could not be read from the audit store."
+            ) from error
+
+    def list_audit_records(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        decision: str | None = None,
+    ) -> tuple[list[AuditRecord], int]:
+        """Return a newest-first page and the matching total count."""
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100.")
+        if offset < 0:
+            raise ValueError("offset must not be negative.")
+        if decision is not None and decision not in DECISION_VALUES:
+            raise ValueError(f"decision must be one of {sorted(DECISION_VALUES)}.")
+
+        try:
+            with self.database.session_factory() as session:
+                records_query = select(RiskDecision)
+                count_query = select(func.count()).select_from(RiskDecision)
+
+                if decision is not None:
+                    records_query = records_query.where(RiskDecision.decision == decision)
+                    count_query = count_query.where(RiskDecision.decision == decision)
+
+                rows = session.scalars(
+                    records_query
+                    .order_by(RiskDecision.created_at.desc(), RiskDecision.id.desc())
+                    .limit(limit)
+                    .offset(offset)
+                ).all()
+                total = int(session.scalar(count_query) or 0)
+
+                return [_to_record(row) for row in rows], total
+        except SQLAlchemyError as error:
+            logger.error("could not list audit records", exc_info=error)
+            raise AuditPersistenceError(
+                "The audit records could not be read from the audit store."
             ) from error
 
     def is_ready(self) -> bool:
