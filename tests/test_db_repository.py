@@ -10,7 +10,9 @@ PostgreSQL stores, and what comes back.
 from __future__ import annotations
 
 import dataclasses
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import Barrier
 
 import pytest
 from sqlalchemy import text
@@ -525,3 +527,102 @@ def test_idempotency_records_are_database_enforced_append_only(
             )
             stored.response_body = {"decision": "BLOCK"}
             session.commit()
+
+
+
+# --- concurrent idempotency --------------------------------------------------
+
+
+def test_concurrent_same_key_and_payload_create_one_decision(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+    audit_database: AuditDatabase,
+):
+    """Simultaneous retries must converge on one committed response and row."""
+    worker_count = 8
+    start = Barrier(worker_count)
+    response_body = {"decision": "REVIEW", "risk_probability": 0.09}
+
+    def submit():
+        start.wait(timeout=10)
+        return audit_repository.create_idempotent_decision(
+            audit_record,
+            idempotency_key="riskforge-concurrent-same-0001",
+            request_hash="d" * 64,
+            response_body=response_body,
+        )
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        responses = list(executor.map(lambda _: submit(), range(worker_count)))
+
+    assert responses == [response_body] * worker_count
+    assert audit_repository.get_idempotency_record(
+        "riskforge-concurrent-same-0001"
+    ) == ("d" * 64, response_body)
+
+    with audit_database.engine.connect() as connection:
+        decision_count = connection.execute(
+            text(f"SELECT COUNT(*) FROM {AUDIT_TABLE_NAME}")
+        ).scalar_one()
+        review_count = connection.execute(
+            text("SELECT COUNT(*) FROM risk_review_cases")
+        ).scalar_one()
+        idempotency_count = connection.execute(
+            text("SELECT COUNT(*) FROM risk_idempotency_records")
+        ).scalar_one()
+
+    assert decision_count == 1
+    assert review_count == 1
+    assert idempotency_count == 1
+
+
+def test_concurrent_different_payloads_for_one_key_have_one_winner(
+    audit_repository: AuditRepository,
+    audit_record: AuditRecord,
+    audit_database: AuditDatabase,
+):
+    """A racing key reuse cannot commit two decisions or silently change payload."""
+    start = Barrier(2)
+
+    def submit(request_hash: str, response_body: dict):
+        start.wait(timeout=10)
+        try:
+            result = audit_repository.create_idempotent_decision(
+                audit_record,
+                idempotency_key="riskforge-concurrent-conflict-0001",
+                request_hash=request_hash,
+                response_body=response_body,
+            )
+        except IdempotencyConflictError:
+            return ("conflict", None)
+        return ("created", result)
+
+    candidates = [
+        ("e" * 64, {"decision": "REVIEW"}),
+        ("f" * 64, {"decision": "BLOCK"}),
+    ]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(
+            executor.map(lambda item: submit(*item), candidates)
+        )
+
+    assert sorted(outcome for outcome, _ in outcomes) == ["conflict", "created"]
+    stored_hash, stored_response = audit_repository.get_idempotency_record(
+        "riskforge-concurrent-conflict-0001"
+    )
+    assert (stored_hash, stored_response) in candidates
+
+    with audit_database.engine.connect() as connection:
+        decision_count = connection.execute(
+            text(f"SELECT COUNT(*) FROM {AUDIT_TABLE_NAME}")
+        ).scalar_one()
+        review_count = connection.execute(
+            text("SELECT COUNT(*) FROM risk_review_cases")
+        ).scalar_one()
+        idempotency_count = connection.execute(
+            text("SELECT COUNT(*) FROM risk_idempotency_records")
+        ).scalar_one()
+
+    assert decision_count == 1
+    assert review_count == 1
+    assert idempotency_count == 1
