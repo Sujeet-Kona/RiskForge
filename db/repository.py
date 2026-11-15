@@ -17,13 +17,18 @@ import math
 import numbers
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from db.models import DECISION_VALUES, RiskDecision
+from db.models import (
+    DECISION_VALUES,
+    RiskDecision,
+    RiskReviewCase,
+    RiskReviewEvent,
+)
 from db.session import AuditDatabase
 
 
@@ -36,6 +41,14 @@ class AuditPersistenceError(RuntimeError):
     Carries no SQL, no connection string and no driver detail. The cause is
     logged server-side, and the caller turns this into a sanitized response.
     """
+
+
+class ReviewCaseNotFoundError(LookupError):
+    """The requested human-review case does not exist."""
+
+
+class ReviewConflictError(RuntimeError):
+    """A review case has already been resolved by another action."""
 
 
 @dataclass(frozen=True)
@@ -113,6 +126,21 @@ class AuditRecord:
         )
 
 
+@dataclass(frozen=True)
+class ReviewCaseRecord:
+    """A review case joined to the immutable automated decision it resolves."""
+
+    id: int
+    decision_id: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    resolved_at: datetime | None
+    resolved_by: str | None
+    resolution_comment: str | None
+    decision: AuditRecord
+
+
 # The decision fields, which map one-to-one onto columns. Derived from the
 # dataclass so a new field cannot be added to the record and silently dropped on
 # the way to the database.
@@ -139,6 +167,14 @@ class AuditStore(Protocol):
         self, *, limit: int, offset: int, decision: str | None = None
     ) -> tuple[list[AuditRecord], int]: ...
 
+    def list_review_cases(
+        self, *, status: str | None, limit: int, offset: int
+    ) -> tuple[list[ReviewCaseRecord], int]: ...
+
+    def resolve_review_case(
+        self, *, case_id: int, outcome: str, reviewer_id: str, comment: str | None
+    ) -> ReviewCaseRecord | None: ...
+
     def is_ready(self) -> bool: ...
 
 
@@ -156,6 +192,9 @@ class AuditRepository:
                     **{name: getattr(record, name) for name in AUDIT_RECORD_FIELDS}
                 )
                 session.add(row)
+                session.flush()
+                if record.decision == "REVIEW":
+                    session.add(RiskReviewCase(decision_id=int(row.id)))
                 session.commit()
 
                 return int(row.id)
@@ -221,6 +260,104 @@ class AuditRepository:
                 "The audit records could not be read from the audit store."
             ) from error
 
+    def list_review_cases(
+        self,
+        *,
+        status: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ReviewCaseRecord], int]:
+        """Return review cases joined to their original decision, newest first."""
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100.")
+        if offset < 0:
+            raise ValueError("offset must not be negative.")
+        if status is not None and status not in {"PENDING", "APPROVED", "REJECTED"}:
+            raise ValueError("status must be PENDING, APPROVED, or REJECTED.")
+
+        try:
+            with self.database.session_factory() as session:
+                query = select(RiskReviewCase, RiskDecision).join(
+                    RiskDecision,
+                    RiskReviewCase.decision_id == RiskDecision.id,
+                )
+                count_query = select(func.count()).select_from(RiskReviewCase)
+                if status is not None:
+                    query = query.where(RiskReviewCase.status == status)
+                    count_query = count_query.where(RiskReviewCase.status == status)
+
+                rows = session.execute(
+                    query.order_by(
+                        RiskReviewCase.created_at.desc(),
+                        RiskReviewCase.id.desc(),
+                    ).limit(limit).offset(offset)
+                ).all()
+                total = int(session.scalar(count_query) or 0)
+
+                return [
+                    _to_review_case(case, decision) for case, decision in rows
+                ], total
+        except SQLAlchemyError as error:
+            logger.error("could not list review cases", exc_info=error)
+            raise AuditPersistenceError(
+                "The review queue could not be read from the audit store."
+            ) from error
+
+    def resolve_review_case(
+        self,
+        *,
+        case_id: int,
+        outcome: str,
+        reviewer_id: str,
+        comment: str | None,
+    ) -> ReviewCaseRecord | None:
+        """Resolve a pending case under a row lock and append a review event."""
+        if outcome not in {"APPROVED", "REJECTED"}:
+            raise ValueError("outcome must be APPROVED or REJECTED.")
+        _require_text(reviewer_id, "reviewer_id")
+
+        try:
+            with self.database.session_factory() as session:
+                case = session.scalar(
+                    select(RiskReviewCase)
+                    .where(RiskReviewCase.id == case_id)
+                    .with_for_update()
+                )
+                if case is None:
+                    return None
+                if case.status != "PENDING":
+                    raise ReviewConflictError(
+                        f"Review case {case_id} has already been resolved."
+                    )
+
+                now = datetime.now(timezone.utc)
+                case.status = outcome
+                case.updated_at = now
+                case.resolved_at = now
+                case.resolved_by = reviewer_id
+                case.resolution_comment = comment
+                session.add(
+                    RiskReviewEvent(
+                        review_case_id=case.id,
+                        action=outcome,
+                        reviewer_id=reviewer_id,
+                        comment=comment,
+                    )
+                )
+                session.flush()
+                decision = session.get(RiskDecision, case.decision_id)
+                result = _to_review_case(case, decision)
+                session.commit()
+
+                return result
+        except ReviewConflictError:
+            raise
+        except SQLAlchemyError as error:
+            logger.error("could not resolve review case %s", case_id, exc_info=error)
+            raise AuditPersistenceError(
+                "The review action could not be recorded in the audit store."
+            ) from error
+
     def is_ready(self) -> bool:
         return self.database.is_ready()
 
@@ -230,6 +367,23 @@ def _to_record(row: RiskDecision) -> AuditRecord:
         **{name: getattr(row, name) for name in AUDIT_RECORD_FIELDS},
         id=int(row.id),
         created_at=row.created_at,
+    )
+
+
+def _to_review_case(
+    case: RiskReviewCase,
+    decision: RiskDecision,
+) -> ReviewCaseRecord:
+    return ReviewCaseRecord(
+        id=int(case.id),
+        decision_id=int(case.decision_id),
+        status=case.status,
+        created_at=case.created_at,
+        updated_at=case.updated_at,
+        resolved_at=case.resolved_at,
+        resolved_by=case.resolved_by,
+        resolution_comment=case.resolution_comment,
+        decision=_to_record(decision),
     )
 
 
