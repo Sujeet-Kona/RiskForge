@@ -212,7 +212,10 @@ database administrator.
 Run the API with the local environment file loaded when using these settings:
 
 ```bash
-uvicorn app.main:app --reload --env-file .env
+set -a
+source .env
+set +a
+uvicorn app.main:app --reload
 ```
 
 
@@ -295,6 +298,9 @@ PYTHONPATH=. python scripts/run_model_benchmark.py
 Start the API:
 
 ~~~bash
+set -a
+source .env
+set +a
 uvicorn app.main:app --reload
 ~~~
 
@@ -320,6 +326,7 @@ Open http://127.0.0.1:8000/docs for the local API schema. The API does not train
 - The API trusts caller-supplied history and cannot independently verify its completeness, freshness, authenticity, or entity association.
 - Prior-history rows are not stored with audit records, so the audit table alone cannot fully replay a score.
 - Idempotency keys are global to this prototype and retained indefinitely; production use would scope keys to an authenticated tenant and define a retention policy.
+- Scoring and read-only decision-history routes are unauthenticated and intended for local demonstration; only reviewer operations require the configured API key.
 - The reviewer API key is a single local operator credential, not enterprise authentication or multi-user role-based access control.
 - Policy costs and review-effectiveness assumptions are synthetic, not measured industry economics.
 - TLS termination, rate limiting, production deployment, drift monitoring, and continuous retraining are outside the current implementation.
