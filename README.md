@@ -175,6 +175,34 @@ The service loads a local artifact identified as xgb-001 / behavioral-v1. It con
 
 TreeSHAP contributions are calculated on the raw XGBoost output margin (log-odds) and mapped back to the original 28 contract features. They are local model signals, not causal explanations, and are not calibrated-probability contributions. The policy explanation separately identifies the probability threshold band that produced the action.
 
+## Local dashboard
+
+A React + TypeScript dashboard is available under `frontend/`. It reads
+`GET /health` and submits transactions to the existing
+`POST /v1/risk/score` endpoint. It displays the calibrated probability, the
+policy decision, TreeSHAP reason signals, risk-reducing signals, and artifact
+version identifiers. The browser does not reimplement feature construction,
+calibration, explainability, or policy logic.
+
+After starting PostgreSQL, building the serving artifact, and starting FastAPI
+as described in [Run locally](#run-locally), start the dashboard in another
+terminal:
+
+```bash
+cd frontend
+cp .env.example .env
+npm install
+npm run dev
+```
+
+Open http://127.0.0.1:5173. The Vite development proxy forwards `/api` requests
+to FastAPI at http://127.0.0.1:8000 by default. See
+[frontend setup](frontend/README.md) for configuration and deployment boundaries.
+
+The initial dashboard supports live scoring and result inspection. Persisted
+decision browsing and the human-review workflow remain planned backend work;
+the UI does not display fabricated history or operational metrics.
+
 ## Verification
 
 The recorded local offline-to-API parity check compared three real VALIDATION transactions: one ALLOW, one REVIEW, and one BLOCK. All 28 feature values matched between offline and API paths. Probabilities, decisions, reason codes, and policy explanations also matched. The largest absolute difference in the two floating-point amount-sum features was 1.310 × 10⁻¹⁰, within the 10⁻⁹ absolute tolerance.
@@ -232,6 +260,7 @@ Open http://127.0.0.1:8000/docs for the local API schema. The API does not train
 ## Repository map
 
 - app/ — FastAPI schemas, lifecycle, feature construction, and scoring.
+- frontend/ — React + TypeScript scoring dashboard and local API proxy.
 - db/ and alembic/ — PostgreSQL models, audit persistence, and migrations.
 - ml/ — data contract, temporal features, split, preprocessing, models, calibration, and artifacts.
 - policy/ — decision thresholds and cost-assumption research.
