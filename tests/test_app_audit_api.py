@@ -306,6 +306,53 @@ def test_a_recovered_audit_store_scores_again(client, audit_store, score_payload
     assert len(audit_store.records) == 1
 
 
+# --- idempotent scoring retries ----------------------------------------------
+
+
+def test_same_idempotency_key_and_payload_replay_the_original_response(
+    client, audit_store, score_payload
+):
+    headers = {"Idempotency-Key": "riskforge-request-0001"}
+    first = client.post(SCORE_ROUTE, json=score_payload, headers=headers)
+    second = client.post(SCORE_ROUTE, json=score_payload, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert len(audit_store.records) == 1
+    assert len(audit_store.idempotency_records) == 1
+
+
+def test_reusing_an_idempotency_key_for_a_different_payload_conflicts(
+    client, audit_store, score_payload
+):
+    headers = {"Idempotency-Key": "riskforge-request-0002"}
+    first = client.post(SCORE_ROUTE, json=score_payload, headers=headers)
+    changed = {
+        **score_payload,
+        "transaction": {
+            **score_payload["transaction"],
+            "TransactionAmt": score_payload["transaction"]["TransactionAmt"] + 1.0,
+        },
+    }
+
+    conflict = client.post(SCORE_ROUTE, json=changed, headers=headers)
+
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+    assert len(audit_store.records) == 1
+
+
+def test_malformed_idempotency_key_is_rejected(client, score_payload):
+    response = client.post(
+        SCORE_ROUTE,
+        json=score_payload,
+        headers={"Idempotency-Key": "bad key"},
+    )
+
+    assert response.status_code == 422
+
+
 # --- human review is separate from the automated decision --------------------
 
 
@@ -483,6 +530,32 @@ def test_scoring_the_same_transaction_twice_records_both_decisions(
         ).scalar_one()
 
     assert count == 2
+
+
+def test_postgres_idempotency_replays_without_a_second_decision(
+    persisted_client, audit_repository, score_payload
+):
+    headers = {"Idempotency-Key": "riskforge-postgres-0001"}
+    first = _score_with_headers(persisted_client, score_payload, headers)
+    second_response = persisted_client.post(SCORE_ROUTE, json=score_payload, headers=headers)
+
+    assert second_response.status_code == 200
+    assert second_response.json() == first
+    with audit_repository.database.engine.connect() as connection:
+        decision_count = connection.execute(
+            text(f"SELECT COUNT(*) FROM {AUDIT_TABLE_NAME}")
+        ).scalar_one()
+        idempotency_count = connection.execute(
+            text("SELECT COUNT(*) FROM risk_idempotency_records")
+        ).scalar_one()
+    assert decision_count == 1
+    assert idempotency_count == 1
+
+
+def _score_with_headers(client: TestClient, payload: dict, headers: dict) -> dict:
+    response = client.post(SCORE_ROUTE, json=payload, headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def test_decision_history_reads_persisted_postgres_rows(
