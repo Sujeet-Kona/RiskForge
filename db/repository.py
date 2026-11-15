@@ -129,6 +129,10 @@ class AuditRecord:
             "policy_version",
         ):
             _require_text(getattr(self, name), name)
+        if self.calibration_method not in {"isotonic", "sigmoid", "unknown"}:
+            raise ValueError(
+                "calibration_method must be isotonic, sigmoid, or unknown."
+            )
 
         _require_count(self.top_k, "top_k", minimum=1)
         _require_count(self.feature_count, "feature_count", minimum=1)
