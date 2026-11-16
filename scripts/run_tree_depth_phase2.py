@@ -610,7 +610,6 @@ def main() -> None:
         "platform": platform.platform(),
         "features": MODEL_FEATURES,
         "phase1_root": str(args.phase1_root.resolve()),
-        "model_fits_started": 0,
         "bootstrap_called": 0,
         "confirmation_called": 0,
         "protocol": {
@@ -729,6 +728,7 @@ def main() -> None:
         if args.preflight_only:
             metadata["status"] = "PREFLIGHT_PASS"
             metadata["preflight_only"] = True
+            metadata["model_fits_started"] = 0
             write_json(output / "run_metadata.json", metadata)
             print("PREFLIGHT_PASS: no model fitting was started", flush=True)
         else:
