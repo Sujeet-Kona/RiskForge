@@ -610,14 +610,17 @@ def main() -> None:
         "platform": platform.platform(),
         "features": MODEL_FEATURES,
         "phase1_root": str(args.phase1_root.resolve()),
+        "model_fits_started": 0,
+        "bootstrap_called": 0,
+        "confirmation_called": 0,
         "protocol": {
             "depths": list(DEPTHS),
             "scale_pos_weight": 1,
             "folds": N_FOLDS,
             "warmup_distinct_timestamp_fraction": 0.5,
             "folds_within_original_train_only": True,
-            "selection": "highest pooled OOF AP; exact ties prefer shallower depth",
-            "close_flag_ap_gap": 0.005,
+            "selection": "highest unweighted mean of five chronological fold AP values; exact ties prefer shallower depth; pooled OOF AP is secondary",
+            "close_flag_mean_fold_ap_gap": 0.005,
             "threshold": THRESHOLD,
             "brier_reduction": "float64",
             "log_loss_clip_epsilon": LOSS_EPSILON,
@@ -631,8 +634,10 @@ def main() -> None:
                 "no TEST feature or target frame loaded, no predictions or selection"
             ),
             "bootstrap": (
-                "500 paired 24-hour nonoverlapping timestamp-block replicates, "
-                "seed20261116, diagnostic only; single-class draws rejected"
+                "paired moving-time-block percentile bootstrap using the existing "
+                "moving_time_block_indices helper; 500 requested replicates; "
+                "24-hour blocks; seed 20261116; at least 90% must contain both "
+                "classes; diagnostic only"
             ),
         },
     }
@@ -724,18 +729,17 @@ def main() -> None:
         if args.preflight_only:
             metadata["status"] = "PREFLIGHT_PASS"
             metadata["preflight_only"] = True
-            metadata["model_fits_started"] = 0
-            metadata["bootstrap_called"] = 0
-            metadata["confirmation_called"] = 0
             write_json(output / "run_metadata.json", metadata)
             print("PREFLIGHT_PASS: no model fitting was started", flush=True)
         else:
             selection = run_folds(train, folds, output)
             metadata["selected_depth"] = selection["selected_depth"]
+            write_json(output / "run_metadata.json", metadata)
             metadata["bootstrap_called"] = 1
-            metadata["confirmation_called"] = 1
             write_json(output / "run_metadata.json", metadata)
             bootstrap_comparisons(output, selection)
+            metadata["confirmation_called"] = 1
+            write_json(output / "run_metadata.json", metadata)
             confirm(
                 train,
                 validation_chronology,
