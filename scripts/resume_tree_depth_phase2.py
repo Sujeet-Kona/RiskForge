@@ -8,7 +8,6 @@ retrospective VALIDATION confirmation.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import time
 from datetime import datetime, timezone
