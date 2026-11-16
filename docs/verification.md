@@ -3,16 +3,18 @@
 ## Executive status
 
 **VERIFIED:** clean-clone installation and checks, artifact rebuild/parity,
-real dashboard authentication using the existing local credential, and both
-review outcomes on disposable API-created validation cases. This sign-off adds
-a genuine Playwright browser-to-FastAPI-to-PostgreSQL review suite and a separate
-CI job. PRs #10–#14 were merged; the inspected starting `main` SHA is
-`bae4031578ae19f63807f290a7b0f5d454a98597`.
+real dashboard authentication using the existing local credential, both review
+outcomes on disposable API-created validation cases, and a Playwright
+browser-to-FastAPI-to-PostgreSQL review suite. PR #15 was merged into `main`.
+The final `main` commit is
+`86a6510219bae7b9b3ea2782c7a14f99243ec8c8`; its CI run
+[`43819079065`](https://github.com/Sujeet-Kona/RiskForge/actions/runs/43819079065)
+passed all three jobs: Browser review E2E, Build React dashboard, and Lint,
+migrate, and test.
 
 Independent human code review remains **NOT PERFORMED**. Automated inspection,
 passing CI and browser acceptance do not constitute human review or production
-approval. Final integration SHAs and CI are recorded on the sign-off PR and
-GitHub's resulting `main` run; this file is written before that merge.
+approval. Production deployment remains **NOT APPROVED**.
 
 ## Clean-clone sign-off (2026-11-16)
 
@@ -388,10 +390,11 @@ base change alone does not start a workflow run.
 | #13 | `0fc037a` | `43759050635`: 1,246 pytest, migration `d8f4b2c6a901`, build passed | `13843b0` |
 
 Push CI on `main` after each of these four merges also passed (after #13:
-run `43759265509` on `13843b0`, 1,246 pytest). PR #14,
-which carries this completion branch, is the final step; its merge commit and
-the resulting `main` CI run are recorded on GitHub, not in this file, because
-this file is committed before that merge.
+run `43759265509` on `13843b0`, 1,246 pytest). PR #14 completed the
+hardening stack. PR #15 added the final browser review E2E suite and sign-off.
+It merged as `86a6510219bae7b9b3ea2782c7a14f99243ec8c8`; final `main` CI
+run `43819079065` passed all three jobs. These are the final integration
+results, not claims of independent human review or production readiness.
 
 ## Evidence locations and local acceptance
 
@@ -412,10 +415,12 @@ cover local usage and database safety.
 - [x] Browser scoring/review workflow and disposable DB persistence inspected.
 - [x] Historical metrics distinguished from fresh engineering checks.
 - [x] Manual-review dashboard acceptance: case #2 APPROVE and case #3 REJECT; both original decisions remain REVIEW.
-- [x] Completion branch pushed as PR #14; CI includes frontend Vitest.
+- [x] Completion branch merged as PR #14; CI includes frontend Vitest.
 - [x] PRs #10–#13 merged into `main` in dependency order with passing CI against `main`.
+- [x] PR #15 merged the Playwright browser-to-API-to-PostgreSQL review suite.
+- [x] Final `main` CI run `43819079065` passed all three jobs at `86a6510`.
 - [ ] **NOT PERFORMED:** independent human code review of the PR stack.
-- [x] Playwright browser-to-API-to-PostgreSQL review suite added by the 2026-11-16 sign-off (see above).
+- [ ] **NOT APPROVED:** production deployment.
 
 The API/PostgreSQL integration tests, component tests and browser walkthrough are
 different evidence layers. Do not describe the mocked component suite as a full
