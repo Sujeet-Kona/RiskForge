@@ -40,6 +40,7 @@ from ml.data.modeling import (  # noqa: E402
     build_modeling_frame,
 )
 from ml.models.xgboost_model import build_xgboost_model  # noqa: E402
+from scripts.run_temporal_evaluation import moving_time_block_indices  # noqa: E402
 
 
 DEPTHS = (3, 4, 5, 6)
@@ -238,6 +239,59 @@ def score(pipeline, frame: pd.DataFrame, output: Path, name: str, **identity) ->
     return probabilities, result
 
 
+
+def rank_depths(results: list[dict]) -> list[dict]:
+    """Rank all configured depths by equal-weight mean fold AP."""
+    if len(results) != len(DEPTHS):
+        raise ValueError(f"Expected exactly {len(DEPTHS)} depth results")
+    seen = [row.get("depth") for row in results]
+    if set(seen) != set(DEPTHS) or len(set(seen)) != len(DEPTHS):
+        raise ValueError("Depth results must contain each configured depth exactly once")
+    for row in results:
+        try:
+            value = float(row["mean_fold_average_precision"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                "Every depth requires a finite mean_fold_average_precision"
+            ) from error
+        if not np.isfinite(value):
+            raise ValueError(
+                "Every depth requires a finite mean_fold_average_precision"
+            )
+    return sorted(
+        results,
+        key=lambda row: (
+            -float(row["mean_fold_average_precision"]),
+            int(row["depth"]),
+        ),
+    )
+
+
+def select_depth(results: list[dict]) -> dict:
+    """Select by mean fold AP; pooled OOF AP remains a secondary diagnostic."""
+    ranked = rank_depths(results)
+    gap = (
+        float(ranked[0]["mean_fold_average_precision"])
+        - float(ranked[1]["mean_fold_average_precision"])
+    )
+    return {
+        "status": "PASS",
+        "selected_depth": ranked[0]["depth"],
+        "selection_metric": (
+            "highest unweighted mean of the five chronological fold "
+            "average_precision values; exact ties prefer shallower depth"
+        ),
+        "selection_metric_note": (
+            "pooled_oof_average_precision is reported as a secondary diagnostic "
+            "and does not determine depth selection"
+        ),
+        "ranking": ranked,
+        "runner_up_mean_fold_ap_gap": gap,
+        "within_predeclared_0_005_close_flag": gap < 0.005,
+        "selection_frozen_before_existing_validation_loaded": True,
+    }
+
+
 def run_folds(train: pd.DataFrame, folds: list[ForwardFold], output: Path) -> dict:
     records = []
     rows = []
@@ -296,10 +350,15 @@ def run_folds(train: pd.DataFrame, folds: list[ForwardFold], output: Path) -> di
         pooled.append(result)
         pd.DataFrame(pooled).to_csv(output / "pooled_oof_metrics.csv", index=False)
         print(f"POOLED depth={depth} OOF_rows={len(labels)} pooled_AP={result['pooled_oof_average_precision']:.12f} mean_fold_AP={mean_fold_ap:.12f}", flush=True)
-    ranked = sorted(pooled, key=lambda row: (-row["average_precision"], row["depth"]))
-    selected = {"status": "PASS", "selected_depth": ranked[0]["depth"], "selection_metric": "highest pooled TRAIN-contained OOF sklearn average_precision_score", "selection_metric_note": "primary selection remains pooled OOF AP; mean_fold_average_precision is reported alongside for transparency and is not the selection statistic", "ranking": ranked, "runner_up_ap_gap": ranked[0]["average_precision"] - ranked[1]["average_precision"], "within_predeclared_0_005_close_flag": ranked[0]["average_precision"] - ranked[1]["average_precision"] < 0.005, "selection_frozen_before_existing_validation_loaded": True}
+    selected = select_depth(pooled)
     write_json(output / "selection.json", selected)
-    print(f"SELECTED depth={selected['selected_depth']} pooled_AP={ranked[0]['average_precision']:.12f} mean_fold_AP={ranked[0]['mean_fold_average_precision']:.12f}", flush=True)
+    best = selected["ranking"][0]
+    print(
+        f"SELECTED depth={selected['selected_depth']} "
+        f"mean_fold_AP={best['mean_fold_average_precision']:.12f} "
+        f"pooled_OOF_AP={best['pooled_oof_average_precision']:.12f}",
+        flush=True,
+    )
     return selected
 
 
