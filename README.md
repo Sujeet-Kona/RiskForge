@@ -233,10 +233,10 @@ set +a
 uvicorn app.main:app --reload
 ```
 
-To enter the key in the dashboard, read it locally from `.env`
-(`grep '^RISKFORGE_REVIEWER_API_KEY=' .env | cut -d= -f2-`). Never commit it or
-paste it into issues, logs or chat. Without both variables the review endpoints
-return 503; a missing or wrong key returns 401.
+Enter the configured key locally in the dashboard's password field. Do not
+print it to a terminal, put it in a `VITE_` variable, commit it, or paste it into
+issues, logs or chat. Without both variables the review endpoints return 503;
+a missing or wrong key returns 401.
 
 
 TreeSHAP contributions are calculated on the raw XGBoost output margin (log-odds) and mapped back to the original 28 contract features. They are local model signals, not causal explanations, and are not calibrated-probability contributions. The policy explanation separately identifies the probability threshold band that produced the action.
@@ -278,7 +278,9 @@ This is a targeted three-case parity check, not exhaustive proof for all possibl
 
 **Before running pytest:** `tests/conftest.py` always derives `riskforge_test` on the configured database server, regardless of the database name in `DATABASE_URL`. It may create, downgrade, rebuild, and truncate that database. Use a disposable **LOCAL** server only, verify the target first, and set `RISKFORGE_REQUIRE_POSTGRES=1` to prevent silent database-test skips. Follow the [database safety and check instructions](docs/reproducibility.md#local-api-and-database-checks).
 
-CI runs Ruff, Python compilation, Alembic migration/schema checks, and pytest with PostgreSQL 17. The frontend job installs dependencies from the committed lockfile with `npm ci`, runs the Vitest suite with `npm test`, then type-checks and creates the production build with `npm run build`. The frontend tests mock API calls; CI does not run a browser end-to-end suite. CI does not download IEEE-CIS, train models, build the serving artifact, run the real-data parity script, connect to an MLflow server, or deploy the API.
+CI runs Ruff, Python compilation, Alembic migration/schema checks, and pytest with PostgreSQL 17. The frontend job runs `npm ci`, Vitest, and the type-check/production build. Vitest uses mocked API calls; a separate Playwright job drives Chromium against real FastAPI and isolated PostgreSQL, with no API mocking. It verifies reviewer authentication, queue details, approve/reject, and duplicate resolution. See the [browser E2E command](frontend/README.md#browser-review-e2e) and [clean-clone sign-off evidence](docs/verification.md#clean-clone-sign-off-2026-11-16). CI does not download IEEE-CIS, train models, build the serving artifact, run real-data parity, connect to MLflow, or deploy the API.
+
+Passing tests are engineering evidence, not independent human code review or production approval. The prototype still lacks enterprise identity/RBAC, TLS termination, rate limiting, operational monitoring and payment-network integration; scoring/history routes remain unauthenticated local-demo endpoints.
 
 ## Technology
 

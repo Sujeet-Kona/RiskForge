@@ -209,5 +209,21 @@ separate serving artifact built by `scripts/build_serving_artifact.py`.
 | `db/` and `alembic/` | PostgreSQL decisions, review cases/events, idempotency, and migrations |
 | `tracking/` | Offline MLflow experiment tracking |
 | `scripts/` | Data, model, evaluation, artifact, and parity workflows |
-| `frontend/` | React + TypeScript scoring dashboard and review queue |
+| `frontend/` | React + TypeScript dashboard, Vitest components, and Playwright browser-review integration tests |
 | `tests/` | Unit, API, database, and integration tests |
+
+## Deployment and sign-off boundaries
+
+This is a loopback research prototype. Scoring and decision-history routes are
+unauthenticated; reviewer operations use a single configured key and identity,
+not enterprise identity management or RBAC. A production deployment would need
+TLS termination, authenticated/authorized access to all sensitive routes,
+rate limiting, key lifecycle management, monitoring/alerting, operational
+capacity tests and a privacy/data-retention design. Vite's proxy provides none
+of those controls. There is no live payment-network integration.
+
+The automated browser suite uses real API/database integration but synthetic
+stored decisions; real-validation scoring acceptance is recorded separately in
+[verification](verification.md#clean-clone-sign-off-2026-11-16). Passing unit,
+integration or browser tests is not an independent human review or production
+approval. Independent human code review remains a human action.

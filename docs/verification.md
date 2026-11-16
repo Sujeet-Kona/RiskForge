@@ -1,19 +1,139 @@
-# Local engineering verification — 2026-11-15
+# Engineering verification — 2026-11-16
 
 ## Executive status
 
-**VERIFIED:** the current local backend, database, serving-parity and frontend
-checks listed below, and dashboard acceptance of one APPROVE and one REJECT
-manual-review case (see [manual-review dashboard acceptance](#manual-review-dashboard-acceptance-2026-11-16)).
-PRs #10–#13 were merged into `main` in dependency order on 2026-11-16, with this
-completion branch (PR #14) as the final step (see [GitHub integration](#github-integration)).
-No independent human code review approval is recorded on those PRs. This is not
-a declaration that the prototype is production-ready.
+**VERIFIED:** clean-clone installation and checks, artifact rebuild/parity,
+real dashboard authentication using the existing local credential, and both
+review outcomes on disposable API-created validation cases. This sign-off adds
+a genuine Playwright browser-to-FastAPI-to-PostgreSQL review suite and a separate
+CI job. PRs #10–#14 were merged; the inspected starting `main` SHA is
+`bae4031578ae19f63807f290a7b0f5d454a98597`.
 
-Work was isolated on `hardening/riskforge-completion`, based on the existing PR
-stack, with PR #11's required fix merged into the stack tip. Final checks covered
-current tracked working-tree contents after base commit `3b38786`, not just that
-commit. Use Git history for the subsequent local completion commit.
+Independent human code review remains **NOT PERFORMED**. Automated inspection,
+passing CI and browser acceptance do not constitute human review or production
+approval. Final integration SHAs and CI are recorded on the sign-off PR and
+GitHub's resulting `main` run; this file is written before that merge.
+
+## Clean-clone sign-off (2026-11-16)
+
+A fresh clone at `/Users/varanasisandeep/riskforge-signoff-20261116` matched the
+full starting SHA above and had a clean tracked tree before changes. Work is on
+`test/browser-e2e-signoff`. The original checkout and its modified/untracked
+files were left untouched. The new Python environment used Python 3.12.5;
+the browser runner reported Node 25.2.1. CI uses Python 3.12, Node 22 and
+PostgreSQL 17.
+
+The Python environment was newly created with `python3.12 -m venv .venv` and
+installed with `python -m pip install -r requirements.txt` plus `ruff==0.17.3`.
+`DATABASE_URL` targeted only local disposable `riskforge_test` for pytest and
+`riskforge_e2e` for browser tests/migrations. `RISKFORGE_REQUIRE_POSTGRES=1` was
+set for pytest. No command migrated the original application database.
+
+| Command | Exit | Observed result |
+| --- | ---: | --- |
+| `python -m ruff check .` | 0 | All checks passed |
+| `python -m compileall -q .` on the starting clean clone | 0 | Compiled |
+| `python -m compileall -q app db ml policy explain tracking scripts tests alembic` after changes | 0 | Compiled |
+| `python -m pip check` | 0 | No broken requirements |
+| `python -m pytest -q` on starting `main` | 0 | 1,256 passed, 1 warning, no skips; 21.91 s |
+| `python -m pytest -q` after adding fixture safeguards | 0 | 1,263 passed, 1 warning, no skips; 11.55 s |
+| `alembic upgrade head`, `alembic current`, `alembic check` on `riskforge_e2e` | 0 | `d8f4b2c6a901`; no new upgrade operations |
+| `npm ci --no-audit --no-fund` after dependency updates | 0 | 160 packages installed |
+| `npm test` | 0 | 60 Vitest tests, 2 files |
+| `npm run typecheck`, `npm run typecheck:e2e`, `npm run build` | 0 | Dashboard and browser-suite types/build passed |
+| `npm audit --audit-level=low` | 0 | 0 reported vulnerabilities |
+| `npm run test:e2e -- --repeat-each=3` with artifact | 0 | 18 browser tests passed, no retries; 56.7 s |
+| Same command without artifact, as in CI | 0 | Final scoped assertions: 18 passed, no retries; 55.4 s |
+| `npm run test:e2e` with existing local `.env` credentials exported privately | 0 | 6 browser tests passed; 19.5 s |
+
+The extra seven pytest tests verify fixture target/cleanup safety; focused and
+repeated tests must not be added together as distinct coverage. The existing
+Starlette/TestClient deprecation warning remains visible. The final browser run
+and CI for the committed head are reported on GitHub, rather than inferred from
+these earlier local runs.
+
+### Data and serving artifact
+
+Only raw CSVs were linked read-only from the existing dataset into the fresh
+clone. Generated features and the rebuilt artifact stayed in the clone's own
+ignored directories; no dataset, `.env`, key or fitted binary is included in
+this PR. These commands ran with `PYTHONPATH` set to the clone root:
+
+| Command | Exit | Observed result |
+| --- | ---: | --- |
+| `python scripts/build_behavioral_features.py` | 0 | 590,540 rows; identical behavioral Parquet SHA-256 |
+| `python scripts/build_serving_artifact.py` | 0 | Locked TRAIN model and VALIDATION calibrator rebuilt |
+| `python scripts/verify_serving_parity.py` | 0 | ALLOW/REVIEW/BLOCK cases agree; locked band counts 81,584 / 2,235 / 4,194 |
+
+Behavioral Parquet SHA-256:
+`da1f5e46ac99ae5ff7f890fde373243ae8ae3518e207af0d8b71f213f6a484ff`.
+Rebuilt serving artifact SHA-256:
+`83cb20ac636aed1a406c2be4050819bc398fc5b0573a1e98496e102a95999c6d`.
+The earlier artifact's hash differs because `built_at_utc` changed. Booster JSON
+was identical and the calibrator's maximum absolute difference over 10,001
+points was 0.0; version, feature, threshold, row-count and library metadata
+matched. This is functional comparison, not byte-identical artifact reproduction
+or fresh validation of every historical benchmark metric.
+
+### Actual dashboard and database acceptance
+
+The clean clone served the rebuilt artifact on loopback 8010, with Vite on 5174
+and only `riskforge_e2e`. The existing ignored `.env` credential was exported to
+processes without being printed. The browser verified missing-key access blocked
+(401 and disabled Load button), wrong-key rejection (401 and alert), and correct
+key access (200, two pending cases). No API mocking was used.
+
+Both cases were created with `POST /v1/risk/score` from legitimate VALIDATION
+features and strictly prior history. Labels were not read for selection/scoring;
+only the transaction identifier was prefixed to mark disposable data. Identical
+idempotent retries returned identical 200 responses.
+
+| Disposable case | Validation source | Prior rows | Original probability / decision | Browser outcome |
+| --- | --- | ---: | --- | --- |
+| #1, `E2E-VALIDATION-3401505` | 3401505 | 29 | 0.09090909090909091 / REVIEW | APPROVED, HTTP 200 |
+| #2, `E2E-VALIDATION-3402682` | 3402682 | 321 | 0.09090909090909091 / REVIEW | REJECTED, HTTP 200 |
+
+SQL-backed assertions confirmed the configured identity `reviewer-local`, one
+review event per case, and full original-decision equality before/after each
+action. Notes explicitly marked acceptance, not an adjudicated fraud label.
+The pending queue was empty; duplicate resolution through the browser's real
+API client returned 409 and left one event. No unexpected console/page errors
+remained after correcting the missing favicon. Cleanup left zero rows in all
+four disposable tables. Original processes/checkout were not replaced.
+
+The committed six-test suite instead seeds **synthetic** audit decisions through
+the repository to avoid requiring external data/model fitting in CI. It tests
+actual browser/API/database integration, including a stale second browser's
+409. Its fixtures forbid other database names, non-loopback hosts and cleanup
+of non-E2E decisions. Run instructions are in [frontend setup](../frontend/README.md#browser-review-e2e).
+
+### Evidence and limits
+
+Tracked-file and Git-history inspection found no datasets, fitted artifacts,
+database files, private keys or non-example `.env` files. Exact reviewer-key
+matches were zero in tracked files and history; the key was never printed.
+Original checkout status still matched its preserved modified/untracked files.
+
+Raw local logs are under `/tmp/signoff-logs/`, including `pytest-final.log`,
+`e2e-final-stability.log`, `e2e-artifact-free-final.log`,
+`e2e-local-credentials.log`, `validation-browser-final.log` and
+`acceptance-database.json`. The dashboard screenshot masks the credential
+field. Temporary files are not durable release artifacts. Failed initial
+selector/resource checks were retained separately, not relabeled as passes.
+
+Unit/API/database tests, mocked component tests, actual browser integration,
+real-validation acceptance, and independent human code review are different
+evidence layers. The last remains a **human action**, not performed by this
+agent. Production identity/RBAC, TLS termination, rate limiting, monitoring,
+load/SLA validation and payment-network integration remain absent. Scoring and
+history are unauthenticated local-demo routes. `npm audit` and file inspection
+are not a whole-system security certification; Python vulnerability scanning
+was not run.
+
+## Earlier hardening evidence (2026-11-15 to 2026-11-16)
+
+The following sections retain the earlier completion-worktree results. They
+are historical evidence, not reruns against the sign-off branch.
 
 ## Defects corrected and affected areas
 
@@ -184,7 +304,8 @@ HTTP 401.
 - Case #3 was the REVIEW transaction closest to the centre of the REVIEW band
   after excluding previously used IDs. The rebuilt VALIDATION frame matched the
   locked band counts.
-- Not verified: the `.env` reviewer key in the dashboard. Reviewer access is a
+- Not verified in this earlier walkthrough: the `.env` reviewer key in the
+  dashboard (verified in the clean-clone sign-off above). Reviewer access is a
   single local demonstration key, not production reviewer authentication. These
   disposable records can be removed by test-suite resets. Review outcomes recorded
   here are acceptance actions, not adjudicated fraud labels.
@@ -294,7 +415,7 @@ cover local usage and database safety.
 - [x] Completion branch pushed as PR #14; CI includes frontend Vitest.
 - [x] PRs #10–#13 merged into `main` in dependency order with passing CI against `main`.
 - [ ] **NOT PERFORMED:** independent human code review of the PR stack.
-- [ ] **NOT IMPLEMENTED:** committed unattended browser-E2E suite.
+- [x] Playwright browser-to-API-to-PostgreSQL review suite added by the 2026-11-16 sign-off (see above).
 
 The API/PostgreSQL integration tests, component tests and browser walkthrough are
 different evidence layers. Do not describe the mocked component suite as a full
