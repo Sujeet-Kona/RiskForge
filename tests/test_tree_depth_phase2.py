@@ -368,9 +368,15 @@ def test_full_run_calls_bootstrap_and_confirmation_exactly_once(tmp_path, monkey
 
     def _bootstrap(output, selection):
         calls["bootstrap"] += 1
+        metadata = runner.json.loads((output / "run_metadata.json").read_text())
+        assert metadata["bootstrap_called"] == 1
+        assert metadata["confirmation_called"] == 0
 
     def _confirm(train, validation_chronology, selected_depth, output, phase1):
         calls["confirm"] += 1
+        metadata = runner.json.loads((output / "run_metadata.json").read_text())
+        assert metadata["bootstrap_called"] == 1
+        assert metadata["confirmation_called"] == 1
 
     monkeypatch.setattr(runner, "bootstrap_comparisons", _bootstrap)
     monkeypatch.setattr(runner, "confirm", _confirm)
@@ -450,3 +456,118 @@ def test_reconstructed_train_matches_phase1_partition_hash():
         frame, runner.PHASE1_TRAIN_SHA256, "TRAIN"
     )
     assert digest == runner.PHASE1_TRAIN_SHA256
+
+# --------------------------------------------------------------------------- #
+# Selection methodology: mean fold AP is primary, pooled OOF AP is secondary.
+# --------------------------------------------------------------------------- #
+
+
+def _selection_rows() -> list[dict]:
+    return [
+        {
+            "depth": 3,
+            "mean_fold_average_precision": 0.50,
+            "pooled_oof_average_precision": 0.70,
+        },
+        {
+            "depth": 4,
+            "mean_fold_average_precision": 0.60,
+            "pooled_oof_average_precision": 0.40,
+        },
+        {
+            "depth": 5,
+            "mean_fold_average_precision": 0.55,
+            "pooled_oof_average_precision": 0.60,
+        },
+        {
+            "depth": 6,
+            "mean_fold_average_precision": 0.45,
+            "pooled_oof_average_precision": 0.80,
+        },
+    ]
+
+
+def test_select_depth_uses_mean_fold_ap_when_pooled_oof_ranking_disagrees():
+    selection = runner.select_depth(_selection_rows())
+
+    assert selection["selected_depth"] == 4
+    assert [row["depth"] for row in selection["ranking"]] == [4, 5, 3, 6]
+    assert selection["selection_metric"].startswith("highest unweighted mean")
+    assert "does not determine" in selection["selection_metric_note"]
+    assert selection["runner_up_mean_fold_ap_gap"] == pytest.approx(0.05)
+
+
+def test_select_depth_breaks_mean_fold_ap_ties_toward_shallower_depth():
+    rows = _selection_rows()
+    rows[0]["mean_fold_average_precision"] = 0.60
+    rows[1]["mean_fold_average_precision"] = 0.60
+
+    selection = runner.select_depth(rows)
+
+    assert selection["selected_depth"] == 3
+    assert [row["depth"] for row in selection["ranking"][:2]] == [3, 4]
+    assert selection["runner_up_mean_fold_ap_gap"] == pytest.approx(0.0)
+    assert selection["within_predeclared_0_005_close_flag"] is True
+
+
+def test_select_depth_rejects_nonfinite_fold_ap():
+    rows = _selection_rows()
+    rows[2]["mean_fold_average_precision"] = float("nan")
+
+    with pytest.raises(ValueError, match="finite mean_fold_average_precision"):
+        runner.select_depth(rows)
+
+
+# --------------------------------------------------------------------------- #
+# Bootstrap must delegate to the established moving-time-block implementation.
+# --------------------------------------------------------------------------- #
+
+
+def test_bootstrap_uses_existing_moving_time_block_helper(tmp_path, monkeypatch):
+    n_rows = 120
+    timestamps = np.arange(n_rows, dtype=np.int64) * 3600
+    labels = (np.arange(n_rows) % 2).astype(np.int64)
+    base_probability = np.linspace(0.01, 0.99, n_rows)
+
+    for depth, offset in ((3, 0.0), (4, 0.01), (6, -0.01)):
+        np.savez_compressed(
+            tmp_path / f"depth_{depth}_oof.npz",
+            transaction_dt=timestamps,
+            label=labels,
+            probability=np.clip(base_probability + offset, 0.001, 0.999),
+        )
+
+    original_helper = runner.moving_time_block_indices
+    calls = []
+
+    def _tracked_helper(timestamp_series, rng, *, block_duration_seconds):
+        calls.append((timestamp_series, block_duration_seconds))
+        return original_helper(
+            timestamp_series,
+            rng,
+            block_duration_seconds=block_duration_seconds,
+        )
+
+    monkeypatch.setattr(runner, "moving_time_block_indices", _tracked_helper)
+    monkeypatch.setattr(runner, "BOOTSTRAP_REPEATS", 100)
+    selection = {
+        "selected_depth": 3,
+        "ranking": [{"depth": 3}, {"depth": 4}, {"depth": 6}, {"depth": 5}],
+    }
+
+    runner.bootstrap_comparisons(tmp_path, selection)
+
+    assert len(calls) == 200  # 100 replicates for each of two references
+    assert all(isinstance(value, pd.Series) for value, _ in calls)
+    assert all(duration == 86400 for _, duration in calls)
+    diagnostics = runner.json.loads(
+        (tmp_path / "oof_bootstrap_diagnostics.json").read_text()
+    )
+    assert [row["reference_depth"] for row in diagnostics["comparisons"]] == [4, 6]
+    assert all(row["valid_replicates"] >= 90 for row in diagnostics["comparisons"])
+    assert all(row["requested_replicates"] == 100 for row in diagnostics["comparisons"])
+    assert all(
+        row["method"] == "paired_moving_time_block_percentile_bootstrap"
+        for row in diagnostics["comparisons"]
+    )
+
