@@ -59,7 +59,51 @@ npm run build
 `npm test` runs Vitest once; `npm run test:watch` is available for local work.
 CI runs `npm ci`, `npm test` (Vitest) and `npm run build`, which type-checks
 with `tsc --noEmit` before the Vite production build. These tests mock API calls;
-they are not a browser end-to-end suite.
+they are separate from the browser-to-database suite below.
+
+### Browser review E2E
+
+Playwright drives Chromium through Vite's proxy to real FastAPI and PostgreSQL,
+without API mocking. It covers missing/wrong/correct reviewer credentials, queue
+loading and details, credential clearing on reload, approve/reject with database
+assertions, and a stale second browser receiving 409. The entire original
+decision and single review event are checked after resolution.
+
+Use a **new disposable local** database named exactly `riskforge_e2e`. Activate
+the repository's Python 3.12 environment first; `python` must resolve to it.
+Never repurpose an existing database or point this command at shared infrastructure.
+From the repository root, after installing Python dependencies:
+
+```bash
+source .venv/bin/activate
+export DATABASE_URL=postgresql+psycopg://localhost:5432/riskforge_e2e
+createdb -h localhost riskforge_e2e
+alembic upgrade head
+cd frontend
+npm ci
+npx playwright install --no-shell chromium
+npm run typecheck:e2e
+npm run test:e2e
+```
+
+The example uses the current local PostgreSQL role; adjust it for your isolated
+server. The fixture refuses any other database name or non-loopback host, and
+refuses cleanup when non-`E2E-` decisions exist. `E2E-` IDs are reserved for
+these disposable tests. Each test resets/seeds two explicitly synthetic REVIEW
+decisions and cleans its own data in teardown. Run only one suite per database.
+If forcibly interrupted, rerun against the same disposable database to reset it.
+
+The runner starts/stops its own API on 8010 and Vite on 5174; both ports must be
+free. It refuses to reuse existing servers. No dataset or serving artifact is
+needed: scoring is unavailable without an artifact, but review operations work.
+It generates an ephemeral reviewer key, or uses credentials already exported
+from a local `.env`; never print those values. Credentials are not traced,
+video-recorded or screenshotted. Browser outputs are ignored by Git.
+
+GitHub Actions runs this suite in a separate PostgreSQL 17 service and installs
+Chromium with `--with-deps --no-shell`. Tests use one worker and zero retries.
+This verifies the review integration, not model accuracy, independent human code
+review, screen-reader acceptance or production readiness.
 
 ## Current scope
 

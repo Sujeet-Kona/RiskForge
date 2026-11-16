@@ -224,11 +224,16 @@ committed lockfile, the Vitest suite (`npm test`), and `npm run build`, which
 type-checks before the production build. See [frontend checks](../frontend/README.md#frontend-checks)
 for local commands.
 
+A separate Playwright job uses Chromium, real FastAPI, Alembic and a disposable
+`riskforge_e2e` PostgreSQL database for reviewer authentication and resolution.
+There is no API mocking in that suite. See the [E2E command and database guards](../frontend/README.md#browser-review-e2e).
+
 CI does **not** download IEEE-CIS, train a model, build the serving artifact,
-run the real-data parity script, connect to MLflow, or deploy the API. Those
-steps require the separately obtained dataset and/or generated local artifacts.
-A green CI run is not a fresh model-training or benchmark reproduction, nor a
-browser end-to-end test; the frontend tests mock API calls.
+run real-data parity, connect to MLflow, or deploy the API. Those steps require
+separately obtained data and generated artifacts. The browser suite seeds
+explicitly synthetic decisions; it does not establish real model-scoring parity.
+A green CI run is not a fresh benchmark reproduction, independent human review,
+or production-readiness approval.
 
 ## Reproducibility boundaries
 
