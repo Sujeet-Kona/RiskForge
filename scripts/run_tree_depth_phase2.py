@@ -368,37 +368,39 @@ def bootstrap_comparisons(output: Path, selection: dict) -> None:
         labels = archive["label"]
         probabilities = archive["probability"]
         timestamps = archive["transaction_dt"]
-    # Sampling units are contiguous 24-hour blocks of the eligible OOF window,
-    # formed from distinct TransactionDT values so tied timestamps stay together.
-    # Each sampled block is stored to completion (no truncation at the series
-    # end), so resamples always reconstruct the full eligible row set. This is
-    # the smallest correction that makes the "n blocks drawn -> full-length
-    # resample" invariant hold for an expanding-window OOF series whose first
-    # timestamp is far from zero. See the audit C3 note.
-    unique_times, group_codes = np.unique(timestamps, return_inverse=True)
-    block_ids = (timestamps - unique_times[0]) // 86400
-    groups = [np.flatnonzero(block_ids == block) for block in np.unique(block_ids)]
-    references = sorted({6, selection["ranking"][1]["depth"]} - {depth})
+    timestamp_series = pd.Series(timestamps)
+    if timestamp_series.isna().any() or not timestamp_series.is_monotonic_increasing:
+        raise ValueError("OOF timestamps must be nonmissing and sorted for block bootstrap")
+
+    runner_up_depth = selection["ranking"][1]["depth"]
+    references = sorted({6, runner_up_depth} - {depth})
+    minimum_valid = int(np.ceil(BOOTSTRAP_REPEATS * 0.90))
     results = []
     for reference in references:
         started = time.perf_counter()
-        print(f"BOOTSTRAP selected={depth} reference={reference} replicates={BOOTSTRAP_REPEATS} blocks={len(groups)}", flush=True)
+        print(
+            f"BOOTSTRAP selected={depth} reference={reference} "
+            f"replicates={BOOTSTRAP_REPEATS} block_seconds=86400",
+            flush=True,
+        )
         with np.load(output / f"depth_{reference}_oof.npz", allow_pickle=False) as archive:
-            if not np.array_equal(archive["transaction_dt"], timestamps) or not np.array_equal(archive["label"], labels):
+            if (
+                not np.array_equal(archive["transaction_dt"], timestamps)
+                or not np.array_equal(archive["label"], labels)
+            ):
                 raise ValueError("Bootstrap reference rows do not align")
             other = archive["probability"]
         rng = np.random.default_rng(BOOTSTRAP_SEED)
         differences = []
         attempts = 0
-        max_attempts = BOOTSTRAP_REPEATS * 20
-        while len(differences) < BOOTSTRAP_REPEATS and attempts < max_attempts:
+        for _ in range(BOOTSTRAP_REPEATS):
             attempts += 1
-            indices = np.concatenate(
-                [groups[i] for i in rng.integers(0, len(groups), len(groups))]
+            indices = moving_time_block_indices(
+                timestamp_series,
+                rng,
+                block_duration_seconds=86400,
             )
             sampled_labels = labels[indices]
-            # AP is not informative when a resample contains only one class.
-            # Reject that draw and keep the paired comparison on identical rows.
             if np.unique(sampled_labels).size != 2:
                 continue
             differences.append(
@@ -407,17 +409,69 @@ def bootstrap_comparisons(output: Path, selection: dict) -> None:
                     - average_precision_score(sampled_labels, other[indices])
                 )
             )
-        if len(differences) != BOOTSTRAP_REPEATS:
+        valid_replicates = len(differences)
+        if valid_replicates < minimum_valid:
             raise RuntimeError(
-                "Could not obtain enough two-class bootstrap replicates; "
-                f"accepted={len(differences)}, attempts={attempts}"
+                "Fewer than 90% of requested moving-time-block bootstrap "
+                f"replicates contained both classes: valid={valid_replicates}, "
+                f"required={minimum_valid}, requested={BOOTSTRAP_REPEATS}"
             )
-        np.savez_compressed(output / f"bootstrap_depth_{depth}_minus_{reference}.npz", ap_difference=np.array(differences))
+        np.savez_compressed(
+            output / f"bootstrap_depth_{depth}_minus_{reference}.npz",
+            ap_difference=np.asarray(differences, dtype=float),
+        )
         lower, upper = np.quantile(differences, [0.025, 0.975])
         elapsed = time.perf_counter() - started
-        results.append({"selected_depth": depth, "reference_depth": reference, "point_ap_difference": float(average_precision_score(labels, probabilities) - average_precision_score(labels, other)), "lower_95_percentile": float(lower), "upper_95_percentile": float(upper), "blocks": len(groups), "block_seconds": 86400, "replicates": BOOTSTRAP_REPEATS, "attempts": attempts, "rejected_single_class_replicates": attempts - BOOTSTRAP_REPEATS, "seed": BOOTSTRAP_SEED, "seconds": elapsed, "method": "paired nonoverlapping 24-hour timestamp-block resampling with replacement; blocks drawn to completion over distinct TransactionDT groups; final calendar block may be partial; single-class draws rejected", "limitation": "conditional on selected fits and chosen blocks; not adjusted for winner selection, temporal drift, seed or retraining uncertainty"})
-        print(f"BOOTSTRAP_DONE reference={reference} interval=[{lower:.12f},{upper:.12f}] seconds={elapsed:.3f}", flush=True)
-    write_json(output / "oof_bootstrap_diagnostics.json", {"comparisons": results, "does_not_change_selection": True})
+        results.append(
+            {
+                "selected_depth": depth,
+                "reference_depth": reference,
+                "point_pooled_oof_ap_difference": float(
+                    average_precision_score(labels, probabilities)
+                    - average_precision_score(labels, other)
+                ),
+                "lower_95_percentile": float(lower),
+                "upper_95_percentile": float(upper),
+                "distinct_timestamp_groups": int(timestamp_series.nunique()),
+                "block_duration_seconds": 86400,
+                "requested_replicates": BOOTSTRAP_REPEATS,
+                "valid_replicates": valid_replicates,
+                "attempts": attempts,
+                "rejected_single_class_replicates": attempts - valid_replicates,
+                "seed": BOOTSTRAP_SEED,
+                "seconds": elapsed,
+                "method": "paired_moving_time_block_percentile_bootstrap",
+                "sampling": (
+                    "existing moving_time_block_indices helper; complete tied "
+                    "TransactionDT groups; contiguous moving blocks sampled "
+                    "without circular wrap-around; final block shortened by "
+                    "remaining timestamp-group count; paired indices shared "
+                    "between selected and reference predictions"
+                ),
+                "limitation": (
+                    "diagnostic conditional on fitted models and selected block "
+                    "duration; does not adjust for winner selection, training "
+                    "randomness, retraining uncertainty, or future temporal drift; "
+                    "resampled row count may vary because timestamp groups have "
+                    "different row multiplicities"
+                ),
+            }
+        )
+        print(
+            f"BOOTSTRAP_DONE reference={reference} "
+            f"valid={valid_replicates}/{BOOTSTRAP_REPEATS} "
+            f"interval=[{lower:.12f},{upper:.12f}] seconds={elapsed:.3f}",
+            flush=True,
+        )
+    write_json(
+        output / "oof_bootstrap_diagnostics.json",
+        {
+            "comparisons": results,
+            "minimum_valid_replicates": minimum_valid,
+            "does_not_change_selection": True,
+        },
+    )
+
 
 
 def confirm(train: pd.DataFrame, validation_chronology: pd.DataFrame, selected_depth: int, output: Path, phase1: Path) -> None:
