@@ -163,7 +163,14 @@ def validate_saved_run(source: Path, train: pd.DataFrame, folds: list) -> dict:
     return recomputed
 
 
-def run_bootstrap(source: Path, output: Path, selection: dict, repeats: int = runner.BOOTSTRAP_REPEATS) -> dict:
+def run_bootstrap(
+    source: Path,
+    output: Path,
+    selection: dict,
+    repeats: int = runner.BOOTSTRAP_REPEATS,
+    *,
+    baseline_depth: int = 6,
+) -> dict:
     selected = int(selection["selected_depth"])
     with np.load(source / f"depth_{selected}_oof.npz", allow_pickle=False) as archive:
         labels = archive["label"].astype(np.int8, copy=False)
@@ -172,7 +179,7 @@ def run_bootstrap(source: Path, output: Path, selection: dict, repeats: int = ru
 
     unique, row_groups = precompute_timestamp_groups(timestamps)
     runner_up = int(selection["ranking"][1]["depth"])
-    references = sorted({6, runner_up} - {selected})
+    references = sorted({int(baseline_depth), runner_up} - {selected})
     minimum_valid = int(np.ceil(repeats * 0.90))
     comparisons = []
 
