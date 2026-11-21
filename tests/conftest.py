@@ -603,11 +603,49 @@ def audit_record():
 
 
 def _audit_test_url() -> str:
-    """The audit test database on whichever server the service is pointed at."""
-    configured = os.environ.get(DATABASE_URL_ENVIRONMENT_VARIABLE, "").strip()
-    url = configured or DEFAULT_DATABASE_URL
+    """Derive a dedicated test database URL, refusing non-local servers.
 
-    return url.rsplit("/", 1)[0] + "/" + AUDIT_TEST_DATABASE
+    The audit fixture downgrades the test database to base before rebuilding it.
+    Never let that destructive operation target a remote/shared PostgreSQL server.
+    """
+    from ipaddress import ip_address
+    from sqlalchemy.engine import make_url
+
+    configured = os.environ.get(DATABASE_URL_ENVIRONMENT_VARIABLE, "").strip()
+    url = make_url(configured or DEFAULT_DATABASE_URL)
+    if url.drivername not in {"postgres", "postgresql", "postgresql+psycopg"}:
+        raise RuntimeError(
+            "RiskForge database tests require a PostgreSQL URL; non-PostgreSQL "
+            "targets are refused."
+        )
+
+    # Match the driver used by the application; bare PostgreSQL schemes would
+    # otherwise default to psycopg2, which is not installed in this project.
+    if url.drivername in {"postgres", "postgresql"}:
+        url = url.set(drivername="postgresql+psycopg")
+
+    host = (url.host or "").lower()
+
+    is_localhost = host == "localhost"
+    try:
+        is_loopback_ip = ip_address(host).is_loopback
+    except ValueError:
+        is_loopback_ip = False
+
+    if not (is_localhost or is_loopback_ip):
+        raise RuntimeError(
+            "RiskForge database tests require an explicitly local PostgreSQL host "
+            "(localhost or a loopback IP). The fixture creates and rebuilds "
+            "riskforge_test; remote/shared database targets are refused."
+        )
+
+    if not url.database:
+        raise RuntimeError(
+            "RiskForge database tests require a configured database name so the "
+            "dedicated riskforge_test target can be derived safely."
+        )
+
+    return str(url.set(database=AUDIT_TEST_DATABASE))
 
 
 def _environment_flag(name: str) -> bool:
@@ -621,10 +659,14 @@ def _postgres_is_required() -> bool:
 def _create_test_database(url: str) -> None:
     """Create the test database, if it is missing and the role may create one."""
     from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
 
-    maintenance_url = url.rsplit("/", 1)[0] + "/postgres"
-    database_name = url.rsplit("/", 1)[1]
+    parsed_url = make_url(url)
+    database_name = parsed_url.database
+    if not database_name:
+        raise RuntimeError("The audit test database URL must include a database name.")
 
+    maintenance_url = str(parsed_url.set(database="postgres"))
     engine = create_engine(maintenance_url, isolation_level="AUTOCOMMIT")
 
     try:

@@ -10,6 +10,7 @@ from xgboost import DMatrix
 from explain.feature_attribution import build_feature_attribution_map
 from explain.model_explanation import (
     ATTRIBUTION_SPACE,
+    ATTRIBUTION_SPACE_NOTE,
     DEFAULT_TOP_K,
     FLOAT32_ADDITIVITY_TOLERANCE,
     NEUTRAL,
@@ -653,3 +654,10 @@ def test_the_attribution_map_is_rebuilt_from_the_pipeline(tiny_explainer):
 
     assert rebuilt.transformed_names == tiny_explainer.attribution.transformed_names
     assert rebuilt.source_features == tiny_explainer.attribution.source_features
+
+
+def test_attribution_note_does_not_overclaim_calibrated_probability_effects():
+    assert "raw margin before isotonic calibration" in ATTRIBUTION_SPACE_NOTE
+    assert "not direct changes in calibrated probability" in ATTRIBUTION_SPACE_NOTE
+    assert "counterfactual effects" in ATTRIBUTION_SPACE_NOTE
+    assert "pushed the deployed risk probability up or down" not in ATTRIBUTION_SPACE_NOTE

@@ -420,3 +420,14 @@ cover local usage and database safety.
 The API/PostgreSQL integration tests, component tests and browser walkthrough are
 different evidence layers. Do not describe the mocked component suite as a full
 browser-to-database E2E suite, or treat this checklist as user sign-off.
+
+
+## Latest PR verification — 2026-11-21
+
+The database-test-safety hardening branch `audit/riskforge-test-db-safety`, commit `c95b63372fc2e3b42410b42eee675c53acc079fc`, has a completed GitHub Actions run [132](https://github.com/Sujeet-Kona/RiskForge/actions/runs/44932221597). All three jobs completed successfully:
+
+- **Lint, migrate, and test** — success.
+- **Build React dashboard** — success.
+- **Browser review E2E** — success.
+
+This is CI evidence for the PR commit, not a new local clean-clone sign-off, model retraining, benchmark regeneration, deployment, or independent human review. The PR is still open and unmerged; the final state of `main` must be checked after integration. The 2026-11-16 local sign-off above remains a separate historical record.

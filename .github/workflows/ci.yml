@@ -27,7 +27,8 @@ jobs:
         env:
           POSTGRES_DB: riskforge
           POSTGRES_USER: riskforge
-          POSTGRES_PASSWORD: riskforge
+          # Trust is limited to this disposable CI service container.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -124,7 +125,8 @@ jobs:
         env:
           POSTGRES_DB: riskforge_e2e
           POSTGRES_USER: riskforge
-          POSTGRES_PASSWORD: riskforge
+          # Trust is limited to this disposable CI service container.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
