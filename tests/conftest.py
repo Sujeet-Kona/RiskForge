@@ -613,6 +613,12 @@ def _audit_test_url() -> str:
 
     configured = os.environ.get(DATABASE_URL_ENVIRONMENT_VARIABLE, "").strip()
     url = make_url(configured or DEFAULT_DATABASE_URL)
+    if url.drivername not in {"postgres", "postgresql", "postgresql+psycopg"}:
+        raise RuntimeError(
+            "RiskForge database tests require a PostgreSQL URL; non-PostgreSQL "
+            "targets are refused."
+        )
+
     host = (url.host or "").lower()
 
     is_localhost = host == "localhost"
