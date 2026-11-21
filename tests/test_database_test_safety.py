@@ -48,3 +48,55 @@ def test_audit_test_database_uses_a_dedicated_local_database_and_preserves_query
     assert target.database == "riskforge_test"
     assert target.host == host
     assert target.query == {"sslmode": "disable"}
+
+
+
+def test_create_test_database_parses_url_and_preserves_query(monkeypatch):
+    from sqlalchemy import text
+
+    captured = {}
+    executed = []
+
+    class FakeResult:
+        def scalar(self):
+            return None
+
+    class FakeConnection:
+        def execute(self, statement, parameters=None):
+            executed.append((str(statement), parameters))
+            return FakeResult()
+
+    class FakeEngine:
+        def connect(self):
+            class ConnectionContext:
+                def __enter__(self):
+                    return FakeConnection()
+
+                def __exit__(self, *_):
+                    return False
+
+            return ConnectionContext()
+
+        def dispose(self):
+            captured["disposed"] = True
+
+    def fake_create_engine(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return FakeEngine()
+
+    monkeypatch.setattr("sqlalchemy.create_engine", fake_create_engine)
+
+    from conftest import _create_test_database
+
+    _create_test_database(
+        "postgresql+psycopg://riskforge:secret@localhost:5432/riskforge_test?sslmode=disable"
+    )
+
+    parsed = make_url(captured["url"])
+    assert parsed.database == "postgres"
+    assert parsed.query == {"sslmode": "disable"}
+    assert captured["kwargs"] == {"isolation_level": "AUTOCOMMIT"}
+    assert executed[0][1] == {"name": "riskforge_test"}
+    assert executed[1][0] == 'CREATE DATABASE "riskforge_test"'
+    assert captured["disposed"] is True
