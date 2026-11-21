@@ -603,11 +603,38 @@ def audit_record():
 
 
 def _audit_test_url() -> str:
-    """The audit test database on whichever server the service is pointed at."""
-    configured = os.environ.get(DATABASE_URL_ENVIRONMENT_VARIABLE, "").strip()
-    url = configured or DEFAULT_DATABASE_URL
+    """Derive a dedicated test database URL, refusing non-local servers.
 
-    return url.rsplit("/", 1)[0] + "/" + AUDIT_TEST_DATABASE
+    The audit fixture downgrades the test database to base before rebuilding it.
+    Never let that destructive operation target a remote/shared PostgreSQL server.
+    """
+    from ipaddress import ip_address
+    from sqlalchemy.engine import make_url
+
+    configured = os.environ.get(DATABASE_URL_ENVIRONMENT_VARIABLE, "").strip()
+    url = make_url(configured or DEFAULT_DATABASE_URL)
+    host = (url.host or "").lower()
+
+    is_localhost = host == "localhost"
+    try:
+        is_loopback_ip = ip_address(host).is_loopback
+    except ValueError:
+        is_loopback_ip = False
+
+    if not (is_localhost or is_loopback_ip):
+        raise RuntimeError(
+            "RiskForge database tests require an explicitly local PostgreSQL host "
+            "(localhost or a loopback IP). The fixture creates and rebuilds "
+            "riskforge_test; remote/shared database targets are refused."
+        )
+
+    if not url.database:
+        raise RuntimeError(
+            "RiskForge database tests require a configured database name so the "
+            "dedicated riskforge_test target can be derived safely."
+        )
+
+    return str(url.set(database=AUDIT_TEST_DATABASE))
 
 
 def _environment_flag(name: str) -> bool:
