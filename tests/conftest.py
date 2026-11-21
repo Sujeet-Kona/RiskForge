@@ -654,10 +654,14 @@ def _postgres_is_required() -> bool:
 def _create_test_database(url: str) -> None:
     """Create the test database, if it is missing and the role may create one."""
     from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
 
-    maintenance_url = url.rsplit("/", 1)[0] + "/postgres"
-    database_name = url.rsplit("/", 1)[1]
+    parsed_url = make_url(url)
+    database_name = parsed_url.database
+    if not database_name:
+        raise RuntimeError("The audit test database URL must include a database name.")
 
+    maintenance_url = str(parsed_url.set(database="postgres"))
     engine = create_engine(maintenance_url, isolation_level="AUTOCOMMIT")
 
     try:
