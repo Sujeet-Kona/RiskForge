@@ -40,7 +40,7 @@ ATTRIBUTION_SPACE_NOTE = (
     "Contributions are expressed in the XGBoost raw margin (log-odds) space, "
     "not in probability space. The base value plus the sum of every "
     "contribution equals the model's raw margin, and the raw model probability "
-    "is sigmoid(margin). These values explain the raw model margin before "
+    "is sigmoid(margin). These values explain the raw margin before "
     "isotonic calibration. The calibration mapping is monotonic but stepwise; "
     "individual contributions are not direct changes in calibrated probability "
     "and do not establish counterfactual effects. Reason codes describe "
