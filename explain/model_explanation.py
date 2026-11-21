@@ -40,11 +40,12 @@ ATTRIBUTION_SPACE_NOTE = (
     "Contributions are expressed in the XGBoost raw margin (log-odds) space, "
     "not in probability space. The base value plus the sum of every "
     "contribution equals the model's raw margin, and the raw model probability "
-    "is sigmoid(margin). Because the locked isotonic calibration is monotonic, "
-    "the sign of a contribution still tells you whether that feature pushed "
-    "the deployed risk probability up or down; the magnitude does not carry "
-    "over, since calibration rescales the margin non-linearly. Reason codes "
-    "therefore describe model-level risk signals, not the calibration mapping."
+    "is sigmoid(margin). These values explain the raw model margin before "
+    "isotonic calibration. The calibration mapping is monotonic but stepwise; "
+    "individual contributions are not direct changes in calibrated probability "
+    "and do not establish counterfactual effects. Reason codes describe "
+    "model-level risk signals, not calibrated probability shifts or policy "
+    "actions."
 )
 
 
