@@ -619,6 +619,11 @@ def _audit_test_url() -> str:
             "targets are refused."
         )
 
+    # Match the driver used by the application; bare PostgreSQL schemes would
+    # otherwise default to psycopg2, which is not installed in this project.
+    if url.drivername in {"postgres", "postgresql"}:
+        url = url.set(drivername="postgresql+psycopg")
+
     host = (url.host or "").lower()
 
     is_localhost = host == "localhost"
