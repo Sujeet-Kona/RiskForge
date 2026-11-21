@@ -99,3 +99,16 @@ def test_create_test_database_parses_url_and_preserves_query(monkeypatch):
     assert executed[0][1] == {"name": "riskforge_test"}
     assert executed[1][0] == 'CREATE DATABASE "riskforge_test"'
     assert captured["disposed"] is True
+
+@pytest.mark.parametrize("scheme", ["postgres", "postgresql"])
+def test_audit_test_database_normalizes_driverless_postgres_schemes(monkeypatch, scheme):
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        f"{scheme}://riskforge:secret@localhost:5432/riskforge?sslmode=disable",
+    )
+
+    target = make_url(_audit_test_url())
+
+    assert target.drivername == "postgresql+psycopg"
+    assert target.database == "riskforge_test"
+    assert target.query == {"sslmode": "disable"}
