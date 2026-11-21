@@ -52,7 +52,6 @@ def test_audit_test_database_uses_a_dedicated_local_database_and_preserves_query
 
 
 def test_create_test_database_parses_url_and_preserves_query(monkeypatch):
-    from sqlalchemy import text
 
     captured = {}
     executed = []
