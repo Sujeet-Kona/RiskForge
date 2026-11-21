@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.engine import make_url
 
-from tests.conftest import _audit_test_url
+from conftest import _audit_test_url
 
 
 @pytest.mark.parametrize(
@@ -34,7 +34,7 @@ def test_audit_test_database_uses_a_dedicated_local_database_and_preserves_query
 ):
     monkeypatch.setenv(
         "DATABASE_URL",
-        f"postgresql+psycopg://riskforge:secret@{host}:5432/riskforge?sslmode=disable",
+        f"postgresql+psycopg://riskforge:secret@{'[' + host + ']' if ':' in host else host}:5432/riskforge?sslmode=disable",
     )
 
     target = make_url(_audit_test_url())
