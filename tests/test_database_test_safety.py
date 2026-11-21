@@ -20,11 +20,17 @@ def test_audit_test_database_refuses_non_loopback_hosts(monkeypatch, host):
         _audit_test_url()
 
 
-@pytest.mark.parametrize("url", ["postgresql+psycopg:///riskforge", "sqlite:///riskforge"])
-def test_audit_test_database_refuses_missing_or_non_postgres_hosts(monkeypatch, url):
-    monkeypatch.setenv("DATABASE_URL", url)
+def test_audit_test_database_refuses_postgres_url_without_host(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg:///riskforge")
 
     with pytest.raises(RuntimeError, match="require an explicitly local"):
+        _audit_test_url()
+
+
+def test_audit_test_database_refuses_non_postgres_url(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///riskforge")
+
+    with pytest.raises(RuntimeError, match="require a PostgreSQL URL"):
         _audit_test_url()
 
 
