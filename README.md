@@ -8,6 +8,21 @@ RiskForge uses the public IEEE-CIS Fraud Detection dataset to build point-in-tim
 
 > **Scope:** This is an offline research and portfolio system evaluated on historical public data. It is not integrated with a payment network, and the reported metrics do not establish live fraud performance.
 
+## Contents
+
+- [At a glance](#at-a-glance)
+- [System architecture](#system-architecture)
+- [Dataset and point-in-time features](#dataset-and-point-in-time-features)
+- [Model evaluation](#model-evaluation)
+- [Decision policy](#decision-policy)
+- [Inference API](#inference-api)
+- [Local dashboard](#local-dashboard)
+- [Verification](#verification)
+- [Run locally](#run-locally)
+- [Repository map](#repository-map)
+- [Limitations](#limitations)
+- [Further documentation](#further-documentation)
+
 ## At a glance
 
 | Item | Implementation |
